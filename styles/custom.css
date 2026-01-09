@@ -1,0 +1,531 @@
+/* 
+ * Roxy Command Center - Custom CSS
+ * ROXY-CMD-STORY-009: Custom styling
+ */
+
+/* === Color Variables === */
+@define-color roxy_accent #7c3aed;
+@define-color pool_big #ef4444;
+@define-color pool_fast #22c55e;
+@define-color alert_critical #dc2626;
+@define-color alert_warning #f59e0b;
+@define-color alert_info #3b82f6;
+@define-color mode_local #22c55e;
+@define-color mode_remote #3b82f6;
+@define-color mode_auto #a855f7;
+
+/* === Window === */
+window.roxy-command-center {
+    background-color: @window_bg_color;
+}
+
+/* === Navigation Sidebar === */
+.navigation-sidebar {
+    background-color: @sidebar_bg_color;
+    border-right: 1px solid @borders;
+}
+
+.nav-button {
+    border-radius: 8px;
+    padding: 10px 12px;
+    min-height: 40px;
+}
+
+.nav-button:checked {
+    background-color: alpha(@accent_bg_color, 0.15);
+    color: @accent_color;
+}
+
+.nav-button:hover:not(:checked) {
+    background-color: alpha(@view_fg_color, 0.07);
+}
+
+.nav-badge {
+    background-color: @alert_warning;
+    color: white;
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: bold;
+    min-width: 18px;
+}
+
+/* === Mode Badge === */
+.mode-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.mode-local {
+    background-color: alpha(@mode_local, 0.2);
+    color: @mode_local;
+}
+
+.mode-remote {
+    background-color: alpha(@mode_remote, 0.2);
+    color: @mode_remote;
+}
+
+.mode-auto {
+    background-color: alpha(@mode_auto, 0.2);
+    color: @mode_auto;
+}
+
+.mode-dot {
+    font-size: 10px;
+}
+
+.mode-dot.mode-local { color: @mode_local; }
+.mode-dot.mode-remote { color: @mode_remote; }
+.mode-dot.mode-auto { color: @mode_auto; }
+
+/* === Alert Badge === */
+.alert-badge {
+    background-color: @alert_warning;
+    color: white;
+    border-radius: 10px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: bold;
+    min-width: 20px;
+}
+
+.alert-badge-critical {
+    background-color: @alert_critical;
+}
+
+.alert-badge-warning {
+    background-color: @alert_warning;
+}
+
+/* === Alert Panel === */
+.alert-panel {
+    background-color: @view_bg_color;
+}
+
+.alert-row {
+    padding: 4px;
+}
+
+.alert-row.alert-critical {
+    background-color: alpha(@alert_critical, 0.1);
+    border-left: 4px solid @alert_critical;
+}
+
+.alert-row.alert-warning {
+    background-color: alpha(@alert_warning, 0.1);
+    border-left: 4px solid @alert_warning;
+}
+
+.alert-row.alert-info {
+    background-color: alpha(@alert_info, 0.1);
+    border-left: 4px solid @alert_info;
+}
+
+.alert-icon-critical { color: @alert_critical; }
+.alert-icon-warning { color: @alert_warning; }
+.alert-icon-info { color: @alert_info; }
+
+.alert-title {
+    font-weight: bold;
+}
+
+.alert-message {
+    font-size: 12px;
+}
+
+.alert-time {
+    font-size: 11px;
+}
+
+/* === Service Card === */
+.service-card {
+    background-color: @card_bg_color;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 8px;
+}
+
+.service-card:hover {
+    background-color: alpha(@view_fg_color, 0.04);
+}
+
+.service-status-icon {
+    min-width: 32px;
+    min-height: 32px;
+}
+
+.service-status-icon.status-running {
+    color: @success_color;
+}
+
+.service-status-icon.status-stopped {
+    color: @error_color;
+}
+
+.service-status-icon.status-error {
+    color: @warning_color;
+}
+
+.service-name {
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.health-badge {
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.health-ok {
+    background-color: alpha(@success_color, 0.2);
+    color: @success_color;
+}
+
+.health-degraded {
+    background-color: alpha(@warning_color, 0.2);
+    color: @warning_color;
+}
+
+.health-error {
+    background-color: alpha(@error_color, 0.2);
+    color: @error_color;
+}
+
+/* === GPU Card === */
+.gpu-card {
+    background-color: @card_bg_color;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 8px;
+}
+
+.gpu-name {
+    font-weight: bold;
+    font-size: 16px;
+}
+
+.pool-badge {
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.pool-badge.pool-big {
+    background-color: alpha(@pool_big, 0.2);
+    color: @pool_big;
+}
+
+.pool-badge.pool-fast {
+    background-color: alpha(@pool_fast, 0.2);
+    color: @pool_fast;
+}
+
+.metric-row {
+    margin: 8px 0;
+}
+
+.metric-label {
+    font-size: 12px;
+    min-width: 80px;
+}
+
+.metric-value {
+    font-family: monospace;
+    font-size: 13px;
+    min-width: 70px;
+}
+
+.temp-normal { color: @success_color; }
+.temp-warm { color: @warning_color; }
+.temp-hot { color: @error_color; }
+
+/* === Progress Bars === */
+progressbar.gpu-vram trough {
+    min-height: 8px;
+    border-radius: 4px;
+}
+
+progressbar.gpu-vram progress {
+    border-radius: 4px;
+}
+
+progressbar.gpu-util progress {
+    background-color: @accent_bg_color;
+}
+
+progressbar.usage-high progress {
+    background-color: @error_color;
+}
+
+progressbar.usage-medium progress {
+    background-color: @warning_color;
+}
+
+progressbar.usage-low progress {
+    background-color: @success_color;
+}
+
+/* === System Stats === */
+.system-stats-panel {
+    padding: 12px;
+}
+
+.stat-card {
+    background-color: @card_bg_color;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 4px;
+}
+
+.stat-title {
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.stat-value {
+    font-family: monospace;
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.stat-subtitle {
+    font-size: 12px;
+    color: @dim_label_color;
+}
+
+/* === Ollama Panel === */
+.ollama-panel {
+    padding: 12px;
+}
+
+.pool-tab {
+    padding: 8px 16px;
+    border-radius: 8px;
+}
+
+.pool-tab.pool-big:checked {
+    background-color: alpha(@pool_big, 0.15);
+}
+
+.pool-tab.pool-fast:checked {
+    background-color: alpha(@pool_fast, 0.15);
+}
+
+.model-card {
+    background-color: @card_bg_color;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 4px 0;
+}
+
+.model-card:hover {
+    background-color: alpha(@view_fg_color, 0.04);
+}
+
+.model-name {
+    font-weight: bold;
+}
+
+.model-size {
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.model-loaded {
+    border-left: 3px solid @success_color;
+}
+
+/* === Mode Switcher === */
+.mode-switcher {
+    padding: 12px;
+}
+
+.mode-dropdown {
+    min-width: 150px;
+}
+
+.source-badge {
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+}
+
+.source-daemon {
+    background-color: alpha(@success_color, 0.2);
+    color: @success_color;
+}
+
+.source-remote {
+    background-color: alpha(@mode_remote, 0.2);
+    color: @mode_remote;
+}
+
+.source-error {
+    background-color: alpha(@error_color, 0.2);
+    color: @error_color;
+}
+
+/* === Connection Status === */
+.connection-status {
+    padding: 4px 8px;
+}
+
+.connection-status.connected {
+    color: @success_color;
+}
+
+.connection-status.disconnected {
+    color: @error_color;
+}
+
+/* === Terminal Pane === */
+.terminal-pane {
+    background-color: #1e1e1e;
+    border-radius: 8px;
+}
+
+.terminal-output {
+    font-family: monospace;
+    font-size: 13px;
+    padding: 8px;
+}
+
+/* === Overview Cards === */
+.overview-grid {
+    padding: 16px;
+}
+
+.overview-card {
+    background-color: @card_bg_color;
+    border-radius: 16px;
+    padding: 20px;
+    min-height: 120px;
+}
+
+.overview-card:hover {
+    background-color: alpha(@view_fg_color, 0.04);
+}
+
+.overview-title {
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.overview-value {
+    font-size: 32px;
+    font-weight: bold;
+}
+
+.overview-subtitle {
+    font-size: 12px;
+    color: @dim_label_color;
+}
+
+/* === Graphs === */
+.graph-widget {
+    background-color: alpha(@view_fg_color, 0.03);
+    border-radius: 8px;
+    min-height: 80px;
+}
+
+/* === Scrollbars === */
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    min-width: 6px;
+    min-height: 6px;
+    border-radius: 3px;
+    background-color: alpha(@view_fg_color, 0.3);
+}
+
+scrollbar slider:hover {
+    background-color: alpha(@view_fg_color, 0.5);
+}
+
+/* === Settings === */
+.settings-page {
+    padding: 24px;
+    max-width: 600px;
+}
+
+.settings-group {
+    margin-bottom: 24px;
+}
+
+.settings-group-title {
+    font-weight: bold;
+    margin-bottom: 12px;
+}
+
+/* === Empty States === */
+.empty-state {
+    padding: 48px;
+}
+
+.empty-state-icon {
+    opacity: 0.5;
+}
+
+.empty-state-title {
+    font-size: 20px;
+    font-weight: bold;
+    margin-top: 16px;
+}
+
+.empty-state-description {
+    color: @dim_label_color;
+    margin-top: 8px;
+}
+
+/* === Actions === */
+.destructive-action {
+    background-color: @destructive_bg_color;
+    color: @destructive_fg_color;
+}
+
+.suggested-action {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+}
+
+/* === Animations === */
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.loading-pulse {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* === Responsive === */
+@media (max-width: 600px) {
+    .navigation-sidebar {
+        width: 60px;
+    }
+    
+    .nav-button label {
+        display: none;
+    }
+    
+    .overview-card {
+        padding: 12px;
+    }
+    
+    .overview-value {
+        font-size: 24px;
+    }
+}
