@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#a78bfa"/>
+      <stop offset="100%" style="stop-color:#818cf8"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="url(#bg)"/>
+  <!-- Inner ring -->
+  <circle cx="64" cy="64" r="48" fill="none" stroke="url(#glow)" stroke-width="3" opacity="0.6"/>
+  <!-- R letter stylized -->
+  <path d="M44 36 L44 92 L52 92 L52 68 L60 68 L76 92 L86 92 L68 66 
+           C76 64 82 58 82 48 C82 38 74 36 64 36 L44 36 Z
+           M52 44 L62 44 C70 44 74 46 74 52 C74 58 70 60 62 60 L52 60 L52 44 Z" 
+        fill="white"/>
+  <!-- Command center dots -->
+  <circle cx="96" cy="36" r="6" fill="#22c55e"/>
+  <circle cx="96" cy="52" r="6" fill="#f59e0b"/>
+  <circle cx="96" cy="68" r="6" fill="#ef4444"/>
+</svg>
