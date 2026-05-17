@@ -44,9 +44,12 @@ class NavigationSidebar(Gtk.Box):
         
         # Navigation items
         nav_items = [
+            ("home", "go-home-symbolic", "Home"),
             ("overview", "view-grid-symbolic", "Overview"),
             ("services", "system-run-symbolic", "Services"),
             ("gpus", "video-display-symbolic", "GPUs"),
+            ("roxy_status", "emblem-ok-symbolic", "Roxy Status"),
+            ("mos_cockpit", "network-workgroup-symbolic", "MOS Cockpit"),
             ("ollama", "face-smile-big-symbolic", "Ollama"),
             ("alerts", "dialog-warning-symbolic", "Alerts"),
             ("terminal", "utilities-terminal-symbolic", "Terminal"),
