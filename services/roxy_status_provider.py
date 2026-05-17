@@ -44,16 +44,20 @@ def _run(cmd: list[str], timeout: int = 5) -> dict[str, Any]:
 
 
 def _findmnt(path: str) -> dict[str, Any]:
-    source = _run(["findmnt", "-no", "SOURCE", path])
-    fstype = _run(["findmnt", "-no", "FSTYPE", path])
-    options = _run(["findmnt", "-no", "OPTIONS", path])
-    opts = options.get("stdout", "")
+    result = _run(["findmnt", "--json", "--target", path, "--output", "SOURCE,FSTYPE,OPTIONS,TARGET"])
+    try:
+        parsed = json.loads(result.get("stdout", "{}"))
+        filesystems = parsed.get("filesystems") if isinstance(parsed, dict) else []
+        first = filesystems[0] if filesystems else {}
+    except Exception:
+        first = {}
+    opts = first.get("options", "") if isinstance(first, dict) else ""
     return {
-        "mounted": bool(source.get("stdout")),
-        "source": source.get("stdout", ""),
-        "fstype": fstype.get("stdout", ""),
+        "mounted": bool(first.get("source")) if isinstance(first, dict) else False,
+        "source": first.get("source", "") if isinstance(first, dict) else "",
+        "fstype": first.get("fstype", "") if isinstance(first, dict) else "",
         "options": opts,
-        "readonly": f",{opts},".find(",ro,") >= 0,
+        "readonly": "ro" in {option.strip() for option in opts.split(",")},
     }
 
 
@@ -94,7 +98,7 @@ def gpu_status() -> dict[str, Any]:
     vulkan = _run(
         ["bash", "-lc", "vulkaninfo --summary 2>/dev/null | grep -E 'GPU[0-9]|deviceName|RADV|llvmpipe' || true"]
     )
-    benchmark = Path("/home/mark/roxy-health/6900-savage-benchmark-20260516-180750/99-100-metric-report.md")
+    benchmark = Path.home() / "roxy-health/6900-savage-benchmark-20260516-180750/99-100-metric-report.md"
     verdict = ""
     if benchmark.exists():
         text = benchmark.read_text(errors="replace")

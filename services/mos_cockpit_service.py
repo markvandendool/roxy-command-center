@@ -10,6 +10,7 @@ bus.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import urllib.error
 import urllib.request
@@ -22,7 +23,12 @@ from services.roxy_status_provider import snapshot as roxy_snapshot
 
 INGRESS_BASE = "http://127.0.0.1:49172"
 AUTHORITY_BASE = "http://127.0.0.1:49173"
-LEDGER_PATH = Path.home() / ".cache" / "roxy-command-center" / "phase2c-result-ledger.jsonl"
+LEDGER_PATH = Path(
+    os.environ.get(
+        "ROXY_COCKPIT_LEDGER_PATH",
+        str(Path.home() / ".cache" / "roxy-command-center" / "phase2c-result-ledger.jsonl"),
+    )
+)
 LEDGER_LIMIT = 200
 
 
@@ -52,6 +58,54 @@ def _safe_text(value: Any, limit: int = 500) -> str:
         return json.dumps(value, sort_keys=True)[:limit]
     except Exception:
         return str(value)[:limit]
+
+
+def _redact_text(value: str, token: str = "") -> str:
+    redacted = value
+    if token:
+        redacted = redacted.replace(token, "[redacted-token]")
+    return redacted.replace("x-ingress-token", "x-ingress-token:[redacted]")
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with tmp_path.open("w") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp_path, path)
+    try:
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except Exception:
+        pass
+
+
+def _sanitize_ledger_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    secret_values = {
+        str(row.get("token"))
+        for row in rows
+        if isinstance(row.get("token"), str) and row.get("token")
+    }
+    sanitized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        clean: dict[str, Any] = {}
+        for key, value in row.items():
+            if key.lower() == "token":
+                continue
+            if isinstance(value, str):
+                redacted = value
+                for secret in secret_values:
+                    redacted = redacted.replace(secret, "[redacted-token]")
+                clean[key] = _redact_text(redacted)
+            else:
+                clean[key] = value
+        sanitized_rows.append(clean)
+    return sanitized_rows
 
 
 def _headers(token: str = "") -> dict[str, str]:
@@ -121,25 +175,38 @@ def controlled_roxy_status_payload() -> dict[str, Any]:
     }
 
 
-def _append_ledger(entry: dict[str, Any]) -> None:
-    LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
-    existing: list[str] = []
-    if LEDGER_PATH.exists():
-        existing = LEDGER_PATH.read_text(errors="replace").splitlines()[-(LEDGER_LIMIT - 1):]
-    existing.append(json.dumps(entry, sort_keys=True))
-    LEDGER_PATH.write_text("\n".join(existing) + "\n")
-
-
-def read_local_ledger(limit: int = 50) -> list[dict[str, Any]]:
+def _ledger_rows(limit: int = LEDGER_LIMIT) -> list[dict[str, Any]]:
     if not LEDGER_PATH.exists():
         return []
     rows: list[dict[str, Any]] = []
-    for line in LEDGER_PATH.read_text(errors="replace").splitlines()[-limit:]:
+    try:
+        lines = LEDGER_PATH.read_text(errors="replace").splitlines()
+    except Exception:
+        return []
+    for line in lines:
         try:
-            rows.append(json.loads(line))
+            row = json.loads(line)
         except Exception:
             continue
-    return list(reversed(rows))
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows[-limit:]
+
+
+def _append_ledger(entry: dict[str, Any]) -> bool:
+    try:
+        rows = _ledger_rows(LEDGER_LIMIT - 1)
+        rows.append(dict(entry))
+        sanitized_rows = _sanitize_ledger_rows(rows)[-LEDGER_LIMIT:]
+        text = "".join(json.dumps(row, sort_keys=True) + "\n" for row in sanitized_rows)
+        _atomic_write_text(LEDGER_PATH, text)
+        return True
+    except Exception:
+        return False
+
+
+def read_local_ledger(limit: int = 50) -> list[dict[str, Any]]:
+    return list(reversed(_ledger_rows(limit)))
 
 
 def listener_status() -> str:
@@ -213,12 +280,12 @@ def send_roxy_status_query(token: str = "") -> dict[str, Any]:
         "route": route,
         "requestSummary": "roxy-command-center/ui:roxy-status -> system.status.query target=roxy",
         "responseStatus": response.get("status"),
-        "responseBodySummary": response.get("bodySummary", ""),
+        "responseBodySummary": _redact_text(response.get("bodySummary", ""), token),
         "eventId": response.get("data", {}).get("eventId") if isinstance(response.get("data"), dict) else None,
         "actionId": "system.status.query",
         "target": "roxy",
         "success": bool(response.get("ok") and response.get("data", {}).get("ok", True)),
         "failureReason": response.get("error") or response.get("data", {}).get("error") if isinstance(response.get("data"), dict) else response.get("error"),
     }
-    _append_ledger(entry)
-    return {"request": payload, "route": route, "response": response, "ledgerEntry": entry}
+    ledger_written = _append_ledger(entry)
+    return {"request": payload, "route": route, "response": response, "ledgerEntry": entry, "ledgerWritten": ledger_written}

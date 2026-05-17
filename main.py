@@ -40,6 +40,26 @@ APP_ID = "org.roxy.CommandCenter.Phase2CReview"
 CSS_PATH = Path(__file__).parent / "styles" / "custom.css"
 
 
+def atomic_write_json(path: Path, data: dict) -> None:
+    """Atomically write small JSON state files inside the same directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with tmp_path.open("w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+    try:
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except Exception:
+        pass
+
+
 class RoxyCommandCenter(Adw.Application):
     """Main application class."""
     
@@ -159,10 +179,7 @@ class RoxyCommandCenter(Adw.Application):
                 "details": details
             }
             
-            with open(breadcrumb_path, "w") as f:
-                json.dump(data, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
+            atomic_write_json(breadcrumb_path, data)
         except Exception as e:
             print(f"[App] Warning: Could not write exit breadcrumb: {e}")
     
