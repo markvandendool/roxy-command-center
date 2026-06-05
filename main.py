@@ -25,6 +25,7 @@ from ui.header_bar import HeaderBar
 from ui.navigation import MainNavigation
 from ui.settings import SettingsPage
 from widgets.home_console_page import HomeConsolePage
+from widgets.mission_dashboard_page import MissionDashboardPage
 from widgets.overview_page import OverviewPage
 from widgets.services_page import ServicesPage
 from widgets.gpus_page import GpusPage
@@ -304,17 +305,24 @@ class MainWindow(Adw.ApplicationWindow):
         self._setup_pages()
         self.navigation.stack.connect("notify::visible-child-name", self._on_visible_page_changed)
         
-        # The hard-surface daily-driver opens on Roxy chat so the operator can
-        # talk naturally first; Overview remains the LifePanel summary page.
-        start_page = os.getenv("ROXY_CC_START_PAGE", "home")
+        # Civilization OS opens on Mission Dashboard so the operator sees
+        # institutional state first; Chat remains available for natural talk.
+        start_page = os.getenv("ROXY_CC_START_PAGE", "missions")
         self.navigation.navigate_to(start_page)
     
     def _setup_pages(self):
         """Set up navigation pages — LifePanel layout."""
+        # Mission Dashboard — the new civilization command center (default)
+        self.missions_page = MissionDashboardPage(
+            on_navigate=self._on_navigate,
+            on_chat=self._on_quick_chat
+        )
+        self.navigation.add_page("missions", "Missions", self.missions_page, "target-symbolic")
+
         # Home Console — lazy, because it owns chat connection setup and review
         # build triage placeholders.
         self.home_page = None
-        self.navigation.add_lazy_page("home", "Home", self._build_home_page, "go-home-symbolic")
+        self.navigation.add_lazy_page("home", "Chat", self._build_home_page, "go-home-symbolic")
         
         # Overview — LifePanel home
         self.overview_page = OverviewPage(on_navigate=self._on_navigate)
@@ -395,6 +403,16 @@ class MainWindow(Adw.ApplicationWindow):
         """Build the operator chat page on demand."""
         self.home_page = HomeConsolePage(on_navigate=self._on_navigate)
         return self.home_page
+
+    def _on_quick_chat(self, text: str):
+        """Handle quick chat from mission dashboard command bar."""
+        print(f"[MainWindow] Quick chat: {text[:80]}...")
+        # Navigate to chat and inject the message
+        self.navigation.navigate_to("home")
+        if self.home_page is not None:
+            # The home page may need to expose a method to inject messages
+            # For now, log it
+            pass
     
     def _on_navigate(self, page_id: str):
         """Handle navigation from overview cards or sidebar.
@@ -433,7 +451,9 @@ class MainWindow(Adw.ApplicationWindow):
             "alerts": self.alerts_page,
             "terminal": self.terminal_page,
         }
-        if visible_name == "home" and self.home_page is not None:
+        if visible_name == "missions" and self.missions_page is not None:
+            self.missions_page.update(data)
+        elif visible_name == "home" and self.home_page is not None:
             self.home_page.update(data)
         elif visible_name in page_map:
             page_map[visible_name].update(data)

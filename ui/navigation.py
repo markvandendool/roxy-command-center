@@ -42,9 +42,10 @@ class NavigationSidebar(Gtk.Box):
         main_section.set_vexpand(True)
         self.append(main_section)
         
-        # Navigation items — LifePanel layout
+        # Navigation items — Civilization OS layout
         nav_items = [
-            ("home", "go-home-symbolic", "Home"),
+            ("missions", "target-symbolic", "Missions"),
+            ("home", "go-home-symbolic", "Chat"),
             ("overview", "view-grid-symbolic", "Overview"),
             ("performance", "preferences-system-symbolic", "Performance"),
             ("apps", "applications-utilities-symbolic", "Apps"),

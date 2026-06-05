@@ -953,3 +953,41 @@ window.compact-mode .overview-card {
     background-color: @moc_red;
     border-radius: 4px;
 }
+
+/* === Mission Dashboard — Civilization OS === */
+.mission-dashboard-page {
+    background-color: @moc_surface_0;
+}
+
+.mission-health-bar trough {
+    background-color: alpha(@moc_line_0, 0.6);
+    border-radius: 3px;
+    min-height: 4px;
+}
+
+.mission-health-bar progress {
+    background-color: @moc_cyan;
+    border-radius: 3px;
+    min-height: 4px;
+}
+
+.mission-dashboard-page .moc-card {
+    min-width: 280px;
+    transition: background-color 150ms ease;
+}
+
+.mission-dashboard-page .moc-card:hover {
+    background-color: alpha(@moc_surface_3, 0.85);
+}
+
+.mission-dashboard-page .moc-card.status-healthy {
+    border-left: 3px solid @moc_green;
+}
+
+.mission-dashboard-page .moc-card.status-warn {
+    border-left: 3px solid @moc_amber;
+}
+
+.mission-dashboard-page .moc-card.status-blocked {
+    border-left: 3px solid @moc_red;
+}
