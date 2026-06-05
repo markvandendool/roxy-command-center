@@ -83,11 +83,13 @@ class ApexLane:
 # =============================================================================
 
 class MissionCard(Gtk.Box):
-    """A mission card with status border, health bar, and metadata."""
+    """A mission card with status border, health bar, metadata, and actions."""
 
-    def __init__(self, mission: Mission):
+    def __init__(self, mission: Mission, on_judge_review=None, on_kimi_assign=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.mission = mission
+        self.on_judge_review = on_judge_review
+        self.on_kimi_assign = on_kimi_assign
         self.set_margin_top(8)
         self.set_margin_bottom(8)
         self.set_margin_start(8)
@@ -161,6 +163,40 @@ class MissionCard(Gtk.Box):
                 s.add_css_class("moc-chip-info")
                 squad_box.append(s)
 
+        # Action buttons (context-aware)
+        actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        actions_box.set_margin_top(6)
+        self.append(actions_box)
+
+        # Judge Review — available for all missions
+        if self.on_judge_review:
+            judge_btn = Gtk.Button(label="⚖️ Judge")
+            judge_btn.add_css_class("pill")
+            judge_btn.add_css_class("caption")
+            judge_btn.set_tooltip_text("Send mission to Judge for adversarial review")
+            judge_btn.connect("clicked", self._on_judge_clicked)
+            actions_box.append(judge_btn)
+
+        # Kimi Assign — available for campaign missions
+        is_campaign = self.mission.id.startswith("campaign-")
+        if is_campaign and self.on_kimi_assign:
+            kimi_btn = Gtk.Button(label="🤖 Kimi")
+            kimi_btn.add_css_class("pill")
+            kimi_btn.add_css_class("caption")
+            kimi_btn.set_tooltip_text("Assign to Kimi long-runner swarm")
+            kimi_btn.connect("clicked", self._on_kimi_clicked)
+            actions_box.append(kimi_btn)
+
+        # Investigate — for blockers and subsystems
+        is_blocker = self.mission.id.startswith("blocker-") or self.mission.id.startswith("subsys-")
+        if is_blocker:
+            invest_btn = Gtk.Button(label="🔍 Investigate")
+            invest_btn.add_css_class("pill")
+            invest_btn.add_css_class("caption")
+            invest_btn.set_tooltip_text("Open investigation for this blocker")
+            invest_btn.connect("clicked", self._on_investigate_clicked)
+            actions_box.append(invest_btn)
+
         # Truth grade + data source footer
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         footer.set_margin_top(4)
@@ -184,6 +220,30 @@ class MissionCard(Gtk.Box):
         src_lbl.add_css_class("moc-row-subtitle")
         src_lbl.set_xalign(0)
         footer.append(src_lbl)
+
+    def _on_judge_clicked(self, button):
+        """Send mission to Judge for review."""
+        if self.on_judge_review:
+            self.on_judge_review(self.mission)
+
+    def _on_kimi_clicked(self, button):
+        """Assign mission to Kimi long-runner."""
+        if self.on_kimi_assign:
+            self.on_kimi_assign(self.mission)
+
+    def _on_investigate_clicked(self, button):
+        """Open investigation dialog."""
+        dialog = Gtk.MessageDialog(
+            transient_for=self.get_root(),
+            modal=True,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text=f"Investigate: {self.mission.name[:50]}",
+        )
+        details = f"Status: {self.mission.status.value}\nBlockers: {', '.join(self.mission.blockers) or 'None'}\nOwner: {self.mission.owner}\nSource: {self.mission.data_source}"
+        dialog.set_secondary_text(details)
+        dialog.connect("response", lambda d, r: d.destroy())
+        dialog.show()
 
     def _make_bar_row(self, label: str, value: int, color: str) -> Gtk.Box:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -705,7 +765,11 @@ class MissionDashboardPage(Gtk.Box):
         self._mission_count.set_label(f"{len(missions)} missions")
 
         for mission in missions:
-            card = MissionCard(mission)
+            card = MissionCard(
+                mission,
+                on_judge_review=self._on_mission_judge_review,
+                on_kimi_assign=self._on_mission_kimi_assign,
+            )
             self._mission_flow.append(card)
 
         # Schedule auto-refresh every 30s
@@ -719,6 +783,55 @@ class MissionDashboardPage(Gtk.Box):
         self._load_missions()
         self._apex_panel._refresh()
         return True  # Continue polling
+
+    def _on_mission_judge_review(self, mission: Mission):
+        """Send mission context to Judge for adversarial review."""
+        context = (
+            f"Mission: {mission.name}\n"
+            f"Status: {mission.status.value}\n"
+            f"Owner: {mission.owner}\n"
+            f"Blockers: {', '.join(mission.blockers) or 'None'}\n"
+            f"Squad: {', '.join(mission.squad) or 'None'}\n"
+            f"Source: {mission.data_source}\n\n"
+            "Please perform an adversarial review of this mission. "
+            "Identify errors, assumptions, gaps, or quality issues."
+        )
+        dialog = Gtk.MessageDialog(
+            transient_for=self.get_root(),
+            modal=True,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text="⚖️ Judge Review Request",
+        )
+        dialog.set_secondary_text(
+            f"Would send to Judge:\n\n{context[:300]}...\n\n"
+            "(Full chat service integration pending — logged for owner review)"
+        )
+        dialog.connect("response", lambda d, r: d.destroy())
+        dialog.show()
+        print(f"[MissionDashboard] Judge review requested for {mission.id}")
+
+    def _on_mission_kimi_assign(self, mission: Mission):
+        """Assign mission to Kimi long-runner swarm."""
+        dialog = Gtk.MessageDialog(
+            transient_for=self.get_root(),
+            modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text="🤖 Assign to Kimi Long-Runner?",
+        )
+        dialog.set_secondary_text(
+            f"Mission: {mission.name}\n"
+            f"Owner: {mission.owner}\n\n"
+            "This would dispatch the mission to the Kimi long-runner swarm. "
+            "Full dispatch API not yet wired — logged for owner review."
+        )
+        def on_response(d, response):
+            if response == Gtk.ResponseType.YES:
+                print(f"[MissionDashboard] Kimi assignment logged for {mission.id}")
+            d.destroy()
+        dialog.connect("response", on_response)
+        dialog.show()
 
     def update(self, data: dict):
         """Update from daemon data."""
