@@ -13,6 +13,10 @@ from typing import Optional, Dict, Any, List
 import json
 from pathlib import Path
 from datetime import datetime
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from services.voice_status_provider import get_voice_status
 
 
 class VoiceActionsPage(Gtk.ScrolledWindow):
@@ -37,6 +41,9 @@ class VoiceActionsPage(Gtk.ScrolledWindow):
         title.set_xalign(0)
         main_box.append(title)
 
+        # Voice Foundry Status Card
+        self._build_voice_status_card(main_box)
+
         # Stats
         self.stats_label = Gtk.Label(label="")
         self.stats_label.add_css_class("caption")
@@ -52,6 +59,76 @@ class VoiceActionsPage(Gtk.ScrolledWindow):
 
         self.rows_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         main_box.append(self.rows_box)
+
+    def _build_voice_status_card(self, parent):
+        """Build the Voice Foundry status card."""
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card.set_margin_top(8)
+        card.set_margin_bottom(8)
+        card.add_css_class("card")
+        parent.append(card)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        card.append(header)
+
+        self._voice_status_label = Gtk.Label(label="Voice Foundry: checking...")
+        self._voice_status_label.add_css_class("title-3")
+        self._voice_status_label.set_xalign(0)
+        self._voice_status_label.set_hexpand(True)
+        header.append(self._voice_status_label)
+
+        self._voice_detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._voice_detail_box.set_margin_start(8)
+        card.append(self._voice_detail_box)
+
+        self._update_voice_status()
+
+    def _update_voice_status(self):
+        """Update Voice Foundry status display."""
+        try:
+            status = get_voice_status()
+            classification = status.get("classification", "UNKNOWN")
+
+            color_class = {
+                "READY": "status-healthy",
+                "DORMANT": "status-warn",
+                "MISSING_SERVICE": "status-blocked",
+                "PATH_ISSUE": "status-blocked",
+                "BLOCKED": "status-blocked",
+            }.get(classification, "status-warn")
+
+            self._voice_status_label.set_label(f"Voice Foundry: {classification}")
+            self._voice_status_label.add_css_class(color_class)
+
+            # Clear details
+            while self._voice_detail_box.get_first_child():
+                self._voice_detail_box.remove(self._voice_detail_box.get_first_child())
+
+            # Service details
+            for svc_name, svc_info in status.get("services", {}).items():
+                alive = "🟢" if svc_info.get("alive") else "🔴"
+                port = svc_info.get("port", "?")
+                lbl = Gtk.Label(label=f"{alive} {svc_name} (:{port})")
+                lbl.add_css_class("moc-row-subtitle")
+                lbl.set_xalign(0)
+                self._voice_detail_box.append(lbl)
+
+            # Blocker / recommendation
+            if status.get("blocker"):
+                blocker_lbl = Gtk.Label(label=f"⚠️ {status['blocker']}")
+                blocker_lbl.add_css_class("caption")
+                blocker_lbl.add_css_class("status-blocked-text")
+                blocker_lbl.set_xalign(0)
+                self._voice_detail_box.append(blocker_lbl)
+
+            if status.get("recommendation"):
+                rec_lbl = Gtk.Label(label=f"💡 {status['recommendation']}")
+                rec_lbl.add_css_class("caption")
+                rec_lbl.set_xalign(0)
+                self._voice_detail_box.append(rec_lbl)
+
+        except Exception as exc:
+            self._voice_status_label.set_label(f"Voice Foundry: ERROR ({exc})")
 
     def _read_receipts(self) -> List[dict]:
         try:
@@ -73,6 +150,7 @@ class VoiceActionsPage(Gtk.ScrolledWindow):
             return []
 
     def update(self, data: dict):
+        self._update_voice_status()
         receipts = self._read_receipts()
 
         # Stats

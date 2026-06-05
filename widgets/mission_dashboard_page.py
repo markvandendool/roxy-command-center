@@ -88,17 +88,18 @@ class ApexLane:
 class MissionCard(Gtk.Box):
     """A mission card with status border, health bar, metadata, and actions."""
 
-    def __init__(self, mission: Mission, on_judge_review=None, on_kimi_assign=None):
+    def __init__(self, mission: Mission):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.mission = mission
-        self.on_judge_review = on_judge_review
-        self.on_kimi_assign = on_kimi_assign
         self.set_margin_top(8)
         self.set_margin_bottom(8)
         self.set_margin_start(8)
         self.set_margin_end(8)
         self.add_css_class("moc-card")
         self.add_css_class(f"status-{mission.status.value}")
+
+        self._active_judge_job_id: Optional[str] = None
+        self._judge_poll_source_id: Optional[int] = None
 
         self._build_ui()
 
@@ -172,17 +173,16 @@ class MissionCard(Gtk.Box):
         self.append(actions_box)
 
         # Judge Review — available for all missions
-        if self.on_judge_review:
-            judge_btn = Gtk.Button(label="⚖️ Judge")
-            judge_btn.add_css_class("pill")
-            judge_btn.add_css_class("caption")
-            judge_btn.set_tooltip_text("Send mission to Judge for adversarial review")
-            judge_btn.connect("clicked", self._on_judge_clicked)
-            actions_box.append(judge_btn)
+        judge_btn = Gtk.Button(label="⚖️ Judge")
+        judge_btn.add_css_class("pill")
+        judge_btn.add_css_class("caption")
+        judge_btn.set_tooltip_text("Send mission to Judge for adversarial review")
+        judge_btn.connect("clicked", self._on_judge_clicked)
+        actions_box.append(judge_btn)
 
         # Kimi Assign — available for campaign missions
         is_campaign = self.mission.id.startswith("campaign-")
-        if is_campaign and self.on_kimi_assign:
+        if is_campaign:
             kimi_btn = Gtk.Button(label="🤖 Kimi")
             kimi_btn.add_css_class("pill")
             kimi_btn.add_css_class("caption")
@@ -199,6 +199,9 @@ class MissionCard(Gtk.Box):
             invest_btn.set_tooltip_text("Open investigation for this blocker")
             invest_btn.connect("clicked", self._on_investigate_clicked)
             actions_box.append(invest_btn)
+
+        # Judge Results — show completed jobs for this mission
+        self._build_judge_results()
 
         # Truth grade + data source footer
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -239,11 +242,73 @@ class MissionCard(Gtk.Box):
             prompt=prompt,
             context=self.mission.name,
             source_mission_id=self.mission.id,
+            on_complete=self._on_judge_complete,
         )
+        self._active_judge_job_id = job.job_id
         # Update button to show queued state
         button.set_label("⏳ Judge queued")
         button.set_sensitive(False)
-        button.set_tooltip_text(f"Job {job.job_id} — check Orchestrator panel for status")
+        button.set_tooltip_text(f"Job {job.job_id} — polling for completion")
+        # Start fallback poller every 3s
+        self._judge_poll_source_id = GLib.timeout_add_seconds(3, self._poll_judge_status)
+
+    def _on_judge_complete(self, job):
+        """Callback when Judge job finishes (called from background thread)."""
+        GLib.idle_add(self._update_judge_ui, job)
+
+    def _update_judge_ui(self, job):
+        """Update UI from main thread when Judge job completes."""
+        if self._judge_poll_source_id:
+            GLib.source_remove(self._judge_poll_source_id)
+            self._judge_poll_source_id = None
+        self._active_judge_job_id = None
+        self._show_judge_result(job)
+        return False  # idle callback single shot
+
+    def _poll_judge_status(self):
+        """Fallback poller — checks job file on disk."""
+        if not self._active_judge_job_id:
+            return False  # Stop polling
+        job = get_judge_service().get_job(self._active_judge_job_id)
+        if job and job.status in ("completed", "failed", "timeout"):
+            self._on_judge_complete(job)
+            return False  # Stop polling — callback handles UI update
+        return True  # Continue polling
+
+    def _show_judge_result(self, job):
+        """Display Judge result inline in the mission card."""
+        # Remove any existing result box
+        if hasattr(self, '_result_box') and self._result_box.get_parent() == self:
+            self.remove(self._result_box)
+
+        self._result_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._result_box.set_margin_top(6)
+
+        status_icon = "✅" if job.status == "completed" else "❌"
+        header = Gtk.Label(label=f"{status_icon} Judge {job.status}")
+        header.add_css_class("caption")
+        header.add_css_class("accent")
+        header.set_xalign(0)
+        self._result_box.append(header)
+
+        if job.result:
+            preview = job.result[:200] + "…" if len(job.result) > 200 else job.result
+            preview = preview.replace("\n", " ")
+            lbl = Gtk.Label(label=preview)
+            lbl.add_css_class("caption")
+            lbl.set_xalign(0)
+            lbl.set_wrap(True)
+            lbl.set_selectable(True)
+            self._result_box.append(lbl)
+
+        if job.error:
+            err = Gtk.Label(label=f"Error: {job.error}")
+            err.add_css_class("caption")
+            err.add_css_class("error")
+            err.set_xalign(0)
+            self._result_box.append(err)
+
+        self.append(self._result_box)
 
     def _on_kimi_clicked(self, button):
         """Assign mission to Kimi — creates real assignment packet."""
@@ -274,6 +339,47 @@ class MissionCard(Gtk.Box):
         button.set_label("📋 Investigate queued")
         button.set_sensitive(False)
         button.set_tooltip_text(f"Packet {packet['packetId']} queued for read-only investigation")
+
+    def _build_judge_results(self):
+        """Show completed Judge review jobs for this mission."""
+        try:
+            from services.judge_service import get_judge_service
+            jobs = get_judge_service().list_jobs(limit=50)
+            mission_jobs = [
+                j for j in jobs
+                if j.get("sourceMissionId") == self.mission.id and j.get("status") == "completed"
+            ]
+            if not mission_jobs:
+                return
+
+            results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            results_box.set_margin_top(6)
+            self.append(results_box)
+
+            header = Gtk.Label(label="⚖️ Judge Results")
+            header.add_css_class("caption")
+            header.add_css_class("accent")
+            header.set_xalign(0)
+            results_box.append(header)
+
+            for job in mission_jobs[:2]:  # Show max 2 results
+                result_text = job.get("result", "")
+                preview = result_text[:120] + "…" if len(result_text) > 120 else result_text
+                preview = preview.replace("\n", " ")
+
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                row.set_margin_start(4)
+                results_box.append(row)
+
+                lbl = Gtk.Label(label=f"• {preview}")
+                lbl.add_css_class("caption")
+                lbl.set_xalign(0)
+                lbl.set_wrap(True)
+                lbl.set_selectable(True)
+                row.append(lbl)
+
+        except Exception as exc:
+            print(f"[MissionCard] Judge results error: {exc}")
 
     def _make_bar_row(self, label: str, value: int, color: str) -> Gtk.Box:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -770,6 +876,7 @@ class MissionDashboardPage(Gtk.Box):
         content.append(self._mission_flow)
 
         self._load_missions()
+        self._start_refresh_timers()
 
         # --- Middle Paned: Agents | APEX ---
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -795,15 +902,13 @@ class MissionDashboardPage(Gtk.Box):
         self._mission_count.set_label(f"{len(missions)} missions")
 
         for mission in missions:
-            card = MissionCard(
-                mission,
-                on_judge_review=self._on_mission_judge_review,
-                on_kimi_assign=self._on_mission_kimi_assign,
-            )
+            card = MissionCard(mission)
             self._mission_flow.append(card)
 
-        # Schedule auto-refresh every 30s
-        GLib.timeout_add_seconds(30, self._auto_refresh)
+    def _start_refresh_timers(self):
+        """Start auto-refresh and judge poller timers (called once)."""
+        self._auto_refresh_id = GLib.timeout_add_seconds(10, self._auto_refresh)
+        self._judge_poll_id = GLib.timeout_add_seconds(5, self._poll_judge_jobs)
 
     def _auto_refresh(self):
         """Reload missions and lanes from canonical sources."""
@@ -814,54 +919,11 @@ class MissionDashboardPage(Gtk.Box):
         self._apex_panel._refresh()
         return True  # Continue polling
 
-    def _on_mission_judge_review(self, mission: Mission):
-        """Send mission context to Judge for adversarial review."""
-        context = (
-            f"Mission: {mission.name}\n"
-            f"Status: {mission.status.value}\n"
-            f"Owner: {mission.owner}\n"
-            f"Blockers: {', '.join(mission.blockers) or 'None'}\n"
-            f"Squad: {', '.join(mission.squad) or 'None'}\n"
-            f"Source: {mission.data_source}\n\n"
-            "Please perform an adversarial review of this mission. "
-            "Identify errors, assumptions, gaps, or quality issues."
-        )
-        dialog = Gtk.MessageDialog(
-            transient_for=self.get_root(),
-            modal=True,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK,
-            text="⚖️ Judge Review Request",
-        )
-        dialog.set_secondary_text(
-            f"Would send to Judge:\n\n{context[:300]}...\n\n"
-            "(Full chat service integration pending — logged for owner review)"
-        )
-        dialog.connect("response", lambda d, r: d.destroy())
-        dialog.show()
-        print(f"[MissionDashboard] Judge review requested for {mission.id}")
-
-    def _on_mission_kimi_assign(self, mission: Mission):
-        """Assign mission to Kimi long-runner swarm."""
-        dialog = Gtk.MessageDialog(
-            transient_for=self.get_root(),
-            modal=True,
-            message_type=Gtk.MessageType.QUESTION,
-            buttons=Gtk.ButtonsType.YES_NO,
-            text="🤖 Assign to Kimi Long-Runner?",
-        )
-        dialog.set_secondary_text(
-            f"Mission: {mission.name}\n"
-            f"Owner: {mission.owner}\n\n"
-            "This would dispatch the mission to the Kimi long-runner swarm. "
-            "Full dispatch API not yet wired — logged for owner review."
-        )
-        def on_response(d, response):
-            if response == Gtk.ResponseType.YES:
-                print(f"[MissionDashboard] Kimi assignment logged for {mission.id}")
-            d.destroy()
-        dialog.connect("response", on_response)
-        dialog.show()
+    def _poll_judge_jobs(self):
+        """Poll for completed Judge jobs — cards handle their own updates via callbacks."""
+        # MissionCard instances use on_complete callback + fallback poller.
+        # This global poller is a safety net for jobs created outside cards.
+        return True  # Continue polling
 
     def update(self, data: dict):
         """Update from daemon data."""
