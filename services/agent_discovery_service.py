@@ -180,9 +180,10 @@ class AgentDiscoveryService:
         """Discover agents from tmux windows."""
         packets = []
         try:
+            # Get window info with pane details
             result = subprocess.run(
-                ["tmux", "list-windows", "-t", "regent-command", "-F",
-                 "#{window_index}|#{window_name}|#{window_active}|#{pane_pid}"],
+                ["tmux", "list-panes", "-t", "regent-command", "-F",
+                 "#{window_index}|#{window_name}|#{window_active}|#{pane_pid}|#{pane_current_command}|#{pane_current_path}"],
                 capture_output=True, text=True, timeout=5
             )
             if result.returncode != 0:
@@ -192,13 +193,16 @@ class AgentDiscoveryService:
                 if "|" not in line:
                     continue
                 parts = line.split("|")
-                if len(parts) < 4:
+                if len(parts) < 6:
                     continue
-                idx, name, active, pane_pid = parts[0], parts[1], parts[2], parts[3]
+                idx, name, active, pane_pid, current_cmd, current_path = parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
                 
                 # Determine lane from window name
                 lane = self._lane_from_name(name)
                 agent_type = self._agent_type_from_name(name)
+                
+                # Use current_cmd for agent_id if it's not just a shell
+                display_cmd = current_cmd if current_cmd not in ("bash", "sh", "zsh", "fish") else ""
                 
                 pkt = AgentContextPacketV1(
                     agent_id=f"{agent_type}-{lane}-{idx}",
@@ -207,10 +211,15 @@ class AgentDiscoveryService:
                     session_name=f"regent-command:{name}",
                     pid=int(pane_pid) if pane_pid.isdigit() else 0,
                     status="active" if active == "1" else "idle",
+                    active_task=display_cmd,
+                    cwd=current_path,
                 )
                 
                 # Read process details for the pane PID
                 self._enrich_from_ps(pkt, int(pane_pid) if pane_pid.isdigit() else None)
+                
+                # Find actual agent child processes (claude, node, etc.)
+                self._find_agent_children(pkt, int(pane_pid) if pane_pid.isdigit() else None)
                 
                 packets.append(pkt)
                 
@@ -344,24 +353,27 @@ class AgentDiscoveryService:
     
     def _lane_from_name(self, name: str) -> str:
         """Extract lane from tmux window name."""
-        if "regent" in name.lower():
+        name_lower = name.lower()
+        if "regent" in name_lower:
             return "regent"
-        if "architect" in name.lower():
+        if "architect" in name_lower:
             return "architect"
-        if "workhorse" in name.lower():
+        if "workhorse" in name_lower:
             return "workhorse"
-        if "research" in name.lower():
+        if "research" in name_lower:
             return "research"
-        if "primary" in name.lower():
+        if "primary" in name_lower:
             return "primary"
-        if "factory" in name.lower():
+        if "factory" in name_lower:
             return "factory"
-        if "testing" in name.lower():
+        if "testing" in name_lower:
             return "testing"
-        if "shell" in name.lower():
+        if "shell" in name_lower or "ops" in name_lower:
             return "ops"
-        if "logs" in name.lower():
+        if "logs" in name_lower:
             return "logs"
+        if "cline" in name_lower or "agent" in name_lower:
+            return "agent"
         return "unknown"
     
     def _agent_type_from_name(self, name: str) -> str:
@@ -400,6 +412,80 @@ class AgentDiscoveryService:
                         pkt.cpu_percent = float(parts[0])
                         pkt.mem_percent = float(parts[1])
                         pkt.tty = parts[2] if parts[2] != "?" else ""
+        except Exception:
+            pass
+    
+    def _find_agent_children(self, pkt: AgentContextPacketV1, parent_pid: Optional[int]):
+        """Find actual agent child processes (claude, node agents, etc.) under a shell."""
+        if not parent_pid:
+            return
+        try:
+            result = subprocess.run(
+                ["pgrep", "-P", str(parent_pid)],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode != 0:
+                return
+            
+            children = []
+            total_cpu = 0.0
+            total_mem = 0.0
+            
+            for child_pid in result.stdout.strip().split("\n"):
+                if not child_pid.strip():
+                    continue
+                try:
+                    ps_result = subprocess.run(
+                        ["ps", "-p", child_pid.strip(), "-o", "comm=,%cpu=,%mem="],
+                        capture_output=True, text=True, timeout=2
+                    )
+                    if ps_result.returncode == 0:
+                        parts = ps_result.stdout.strip().split()
+                        cmd = parts[0] if parts else ""
+                        cpu = float(parts[1]) if len(parts) > 1 else 0.0
+                        mem = float(parts[2]) if len(parts) > 2 else 0.0
+                        children.append({"pid": int(child_pid), "cmd": cmd, "cpu": cpu, "mem": mem})
+                        total_cpu += cpu
+                        total_mem += mem
+                except Exception:
+                    pass
+            
+            pkt.child_processes = children
+            pkt.child_count = len(children)
+            
+            # Aggregate CPU/MEM from children (more accurate than shell PID)
+            if children:
+                pkt.cpu_percent = total_cpu
+                pkt.mem_percent = total_mem
+            
+            # Find MCP servers among children
+            pkt.mcp_servers = []
+            for child in children:
+                cmd = child["cmd"]
+                for pattern in MCP_PATTERNS:
+                    if pattern.search(cmd):
+                        pkt.mcp_servers.append(cmd)
+                        break
+            
+            # Update active_task if we found a real agent process
+            for child in children:
+                cmd = child["cmd"]
+                if cmd in ("claude", "node", "python3"):
+                    # Try to get the full command line
+                    try:
+                        cmdline_result = subprocess.run(
+                            ["ps", "-p", str(child["pid"]), "-o", "args="],
+                            capture_output=True, text=True, timeout=2
+                        )
+                        if cmdline_result.returncode == 0:
+                            full_cmd = cmdline_result.stdout.strip()
+                            if len(full_cmd) > 80:
+                                full_cmd = full_cmd[:77] + "..."
+                            pkt.active_task = full_cmd
+                            break
+                    except Exception:
+                        pass
+                
         except Exception:
             pass
     
@@ -486,7 +572,32 @@ class AgentDiscoveryService:
         if p.last_activity_age_seconds > 1800:
             score -= 10
         
+        # Generate next action recommendation
+        p.next_action = self._recommend_action(p)
+        
         return max(0, score)
+    
+    def _recommend_action(self, p: AgentContextPacketV1) -> str:
+        """Generate a recommended next action based on agent state."""
+        if p.status == "duplicate":
+            return f"Consider closing duplicate — keep only the most recent {p.lane} agent"
+        if p.status == "stale":
+            return "Agent has been idle >1 hour — verify if still needed or close"
+        if p.blocked_reason:
+            return f"Resolve blocker: {p.blocked_reason}"
+        if p.dirty_count > 30:
+            return f"High dirty file count ({p.dirty_count}) — run save-work or clean"
+        if p.dirty_count > 10:
+            return f"Moderate dirty files ({p.dirty_count}) — review before next action"
+        if not p.last_receipt:
+            return "No lifecycle receipt found — verify agent is producing evidence"
+        if p.last_activity_age_seconds > 600:
+            return f"Agent quiet for {p.last_activity_age_seconds//60}m — check if blocked"
+        if p.health_score < 50:
+            return "Low health score — inspect process and logs"
+        if p.mcp_servers:
+            return f"Running with {len(p.mcp_servers)} MCP servers — normal operation"
+        return "Agent healthy — no action required"
 
 
 # =============================================================================
