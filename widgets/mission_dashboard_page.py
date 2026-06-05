@@ -31,6 +31,9 @@ from services.agent_discovery_service import AgentDiscoveryService
 from services.gpu_monitor import get_gpu_monitor
 from services.roxy_status_provider import gpu_status as roxy_gpu_status
 from services.mission_truth_provider import MissionTruthProvider
+from services.judge_service import get_judge_service
+from services.kimi_assignment_service import create_assignment_packet
+from services.investigation_service import create_investigation_packet
 
 
 # =============================================================================
@@ -222,28 +225,55 @@ class MissionCard(Gtk.Box):
         footer.append(src_lbl)
 
     def _on_judge_clicked(self, button):
-        """Send mission to Judge for review."""
-        if self.on_judge_review:
-            self.on_judge_review(self.mission)
+        """Send mission to Judge for adversarial review — creates real job."""
+        prompt = (
+            f"Mission: {self.mission.name}\n"
+            f"Status: {self.mission.status.value}\n"
+            f"Owner: {self.mission.owner}\n"
+            f"Blockers: {', '.join(self.mission.blockers) or 'None'}\n"
+            f"Squad: {', '.join(self.mission.squad) or 'None'}\n"
+            f"Source: {self.mission.data_source}\n\n"
+            "Please perform an adversarial review. Identify errors, assumptions, gaps, or quality issues."
+        )
+        job = get_judge_service().submit_job(
+            prompt=prompt,
+            context=self.mission.name,
+            source_mission_id=self.mission.id,
+        )
+        # Update button to show queued state
+        button.set_label("⏳ Judge queued")
+        button.set_sensitive(False)
+        button.set_tooltip_text(f"Job {job.job_id} — check Orchestrator panel for status")
 
     def _on_kimi_clicked(self, button):
-        """Assign mission to Kimi long-runner."""
-        if self.on_kimi_assign:
-            self.on_kimi_assign(self.mission)
+        """Assign mission to Kimi — creates real assignment packet."""
+        result = create_assignment_packet(
+            mission_id=self.mission.id,
+            mission_title=self.mission.name,
+            brief=(
+                f"Mission: {self.mission.name}\n"
+                f"Status: {self.mission.status.value}\n"
+                f"Blockers: {', '.join(self.mission.blockers) or 'None'}\n"
+                f"Source: {self.mission.data_source}"
+            ),
+        )
+        packet = result["packet"]
+        button.set_label(f"🤖 Kimi → {packet['targetSurface']}")
+        button.set_sensitive(False)
+        button.set_tooltip_text(f"Packet {packet['packetId']} queued for {packet['targetSurface']}")
 
     def _on_investigate_clicked(self, button):
-        """Open investigation dialog."""
-        dialog = Gtk.MessageDialog(
-            transient_for=self.get_root(),
-            modal=True,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK,
-            text=f"Investigate: {self.mission.name[:50]}",
+        """Create read-only investigation packet."""
+        result = create_investigation_packet(
+            mission_id=self.mission.id,
+            mission_title=self.mission.name,
+            question=f"Investigate mission '{self.mission.name}': what is the root cause and recommended fix?",
+            source_artifacts=[self.mission.data_source],
         )
-        details = f"Status: {self.mission.status.value}\nBlockers: {', '.join(self.mission.blockers) or 'None'}\nOwner: {self.mission.owner}\nSource: {self.mission.data_source}"
-        dialog.set_secondary_text(details)
-        dialog.connect("response", lambda d, r: d.destroy())
-        dialog.show()
+        packet = result["packet"]
+        button.set_label("📋 Investigate queued")
+        button.set_sensitive(False)
+        button.set_tooltip_text(f"Packet {packet['packetId']} queued for read-only investigation")
 
     def _make_bar_row(self, label: str, value: int, color: str) -> Gtk.Box:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
