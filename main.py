@@ -26,6 +26,7 @@ from ui.navigation import MainNavigation
 from ui.settings import SettingsPage
 from widgets.home_console_page import HomeConsolePage
 from widgets.mission_dashboard_page import MissionDashboardPage
+from widgets.orchestrator_panel import OrchestratorPanel
 from widgets.overview_page import OverviewPage
 from widgets.services_page import ServicesPage
 from widgets.gpus_page import GpusPage
@@ -318,6 +319,10 @@ class MainWindow(Adw.ApplicationWindow):
             on_chat=self._on_quick_chat
         )
         self.navigation.add_page("missions", "Missions", self.missions_page, "target-symbolic")
+
+        # Orchestrator — pending actions, queued jobs, recent outcomes
+        self.orchestrator_page = OrchestratorPanel()
+        self.navigation.add_page("orchestrator", "Orchestrator", self.orchestrator_page, "system-run-symbolic")
 
         # Home Console — lazy, because it owns chat connection setup and review
         # build triage placeholders.
