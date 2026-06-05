@@ -1091,6 +1091,7 @@ class TalkColumn(Gtk.Box):
         
         self.chat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         scrolled.set_child(self.chat_box)
+        self._chat_scrolled = scrolled  # Reference for auto-scroll
         
         # Typing indicator (hidden by default)
         self._typing_indicator = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1234,6 +1235,12 @@ class TalkColumn(Gtk.Box):
         self.entry.set_hexpand(True)
         self.entry.set_placeholder_text("Talk to Roxy...")
         self.entry.connect("activate", self._on_send)
+        
+        # Phase 7: Keyboard shortcuts — Ctrl+Enter to send, Escape to clear
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_entry_key_pressed)
+        self.entry.add_controller(key_controller)
+        
         input_row.append(self.entry)
         
         # Send button
@@ -1426,6 +1433,17 @@ class TalkColumn(Gtk.Box):
             self._typing_indicator.set_visible(False)
         self._connect_to_roxy()
     
+    def _scroll_to_bottom(self):
+        """Auto-scroll chat to bottom when new messages arrive."""
+        if hasattr(self, '_chat_scrolled'):
+            adj = self._chat_scrolled.get_vadjustment()
+            if adj:
+                # Use idle_add to scroll after widget allocation
+                def _do_scroll():
+                    adj.set_value(adj.get_upper() - adj.get_page_size())
+                    return False
+                GLib.idle_add(_do_scroll)
+    
     def _on_chat_message(self, message: ServiceChatMessage):
         """Called when a new message arrives (user or assistant)."""
         # Convert to UI widget with harness metadata
@@ -1448,6 +1466,7 @@ class TalkColumn(Gtk.Box):
         )
         widget = ChatMessage_Widget(ui_message)
         self.chat_box.append(widget)
+        self._scroll_to_bottom()
         
         # Update latency chip for assistant messages
         if message.role == "assistant":
@@ -1467,6 +1486,7 @@ class TalkColumn(Gtk.Box):
         )
         widget = ChatMessage_Widget(message)
         self.chat_box.append(widget)
+        self._scroll_to_bottom()
     
     def _on_status_change(self, status: ConnectionStatus, message: str):
         """Called when connection status changes."""
@@ -1644,6 +1664,26 @@ class TalkColumn(Gtk.Box):
                 return "CHAT"
         
         return ""
+    
+    def _on_entry_key_pressed(self, controller, keyval, keycode, state):
+        """Handle keyboard shortcuts in the entry field."""
+        from gi.repository import Gdk
+        ctrl = (state & Gdk.ModifierType.CONTROL_MASK) != 0
+        
+        if keyval == Gdk.KEY_Return and ctrl:
+            # Ctrl+Enter sends message
+            self._on_send(self.entry)
+            return True
+        elif keyval == Gdk.KEY_Escape:
+            # Escape clears entry (if not empty) or defocuses
+            text = self.entry.get_text().strip()
+            if text:
+                self.entry.set_text("")
+            else:
+                self.entry.set_can_focus(False)
+                self.entry.set_can_focus(True)
+            return True
+        return False
     
     def _on_send(self, widget):
         """Send message to local Ollama."""
