@@ -14,15 +14,169 @@
 @define-color mode_remote #3b82f6;
 @define-color mode_auto #a855f7;
 
+/* === MOSCore / LifePanel Control Surface Tokens === */
+@define-color moc_surface_0 #090d13;
+@define-color moc_surface_1 #101722;
+@define-color moc_surface_2 #151e2b;
+@define-color moc_surface_3 #1b2636;
+@define-color moc_ink_0 #f5f7fb;
+@define-color moc_ink_1 #d8e1ec;
+@define-color moc_ink_2 #8fa0b5;
+@define-color moc_line_0 #223044;
+@define-color moc_line_1 #31435a;
+@define-color moc_cyan #4fd6ff;
+@define-color moc_gold #f4c95d;
+@define-color moc_green #35d07f;
+@define-color moc_amber #f5b64a;
+@define-color moc_red #f06464;
+@define-color moc_purple #b18cff;
+
+.moc-surface {
+    background-color: @moc_surface_0;
+    color: @moc_ink_1;
+}
+
+.moc-panel,
+.moc-card,
+.moc-rail,
+.moc-inspector {
+    background-color: alpha(@moc_surface_2, 0.92);
+    border: 1px solid alpha(@moc_line_1, 0.76);
+    border-radius: 8px;
+    color: @moc_ink_1;
+}
+
+.moc-panel,
+.moc-rail,
+.moc-inspector {
+    padding: 14px;
+}
+
+.moc-card {
+    padding: 16px;
+}
+
+.moc-rail {
+    background-color: alpha(@moc_surface_1, 0.96);
+}
+
+.moc-mission-canvas {
+    background-color: alpha(@moc_surface_0, 0.5);
+}
+
+.moc-object-row,
+.moc-procedure-row {
+    background-color: alpha(@moc_surface_3, 0.55);
+    border: 1px solid alpha(@moc_line_0, 0.82);
+    border-radius: 6px;
+    padding: 10px;
+    margin: 3px 0;
+}
+
+.moc-object-row:hover,
+.moc-procedure-row:hover {
+    background-color: alpha(@moc_surface_3, 0.82);
+    border-color: alpha(@moc_cyan, 0.42);
+}
+
+.moc-row-title {
+    color: @moc_ink_0;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.moc-row-value {
+    color: @moc_cyan;
+    font-family: monospace;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.moc-row-subtitle {
+    color: @moc_ink_2;
+    font-size: 11px;
+}
+
+.moc-chip,
+.moc-chip-success,
+.moc-chip-warning,
+.moc-chip-danger,
+.moc-chip-info,
+.moc-chip-regent {
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 9px;
+}
+
+.moc-chip-success {
+    background-color: alpha(@moc_green, 0.18);
+    color: @moc_green;
+}
+
+.moc-chip-warning {
+    background-color: alpha(@moc_amber, 0.2);
+    color: @moc_amber;
+}
+
+.moc-chip-danger {
+    background-color: alpha(@moc_red, 0.18);
+    color: @moc_red;
+}
+
+.moc-chip-info {
+    background-color: alpha(@moc_cyan, 0.16);
+    color: @moc_cyan;
+}
+
+.moc-chip-regent {
+    background-color: alpha(@moc_gold, 0.18);
+    color: @moc_gold;
+}
+
+.moc-section-label {
+    color: @moc_ink_2;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.overview-card.status-healthy,
+.moc-object-row.status-healthy,
+.moc-procedure-row.status-healthy,
+.moc-panel.status-healthy {
+    border-left: 3px solid @moc_green;
+}
+
+.overview-card.status-warn,
+.moc-object-row.status-warn,
+.moc-procedure-row.status-warn,
+.moc-panel.status-warn {
+    border-left: 3px solid @moc_amber;
+}
+
+.overview-card.status-blocked,
+.moc-object-row.status-blocked,
+.moc-procedure-row.status-blocked,
+.moc-panel.status-blocked {
+    border-left: 3px solid @moc_red;
+}
+
 /* === Window === */
 window.roxy-command-center {
-    background-color: @window_bg_color;
+    background-color: @moc_surface_0;
+    color: @moc_ink_1;
 }
 
 /* === Navigation Sidebar === */
+.main-navigation,
+.content-stack {
+    background-color: @moc_surface_0;
+}
+
 .navigation-sidebar {
-    background-color: @sidebar_bg_color;
-    border-right: 1px solid @borders;
+    background-color: @moc_surface_1;
+    border-right: 1px solid @moc_line_0;
 }
 
 .nav-button {
@@ -32,12 +186,12 @@ window.roxy-command-center {
 }
 
 .nav-button:checked {
-    background-color: alpha(@accent_bg_color, 0.15);
-    color: @accent_color;
+    background-color: alpha(@moc_cyan, 0.14);
+    color: @moc_cyan;
 }
 
 .nav-button:hover:not(:checked) {
-    background-color: alpha(@view_fg_color, 0.07);
+    background-color: alpha(@moc_ink_1, 0.07);
 }
 
 .nav-badge {
@@ -144,14 +298,15 @@ window.roxy-command-center {
 
 /* === Service Card === */
 .service-card {
-    background-color: @card_bg_color;
-    border-radius: 12px;
+    background-color: alpha(@moc_surface_2, 0.92);
+    border: 1px solid alpha(@moc_line_0, 0.75);
+    border-radius: 8px;
     padding: 16px;
     margin: 8px;
 }
 
 .service-card:hover {
-    background-color: alpha(@view_fg_color, 0.04);
+    background-color: alpha(@moc_surface_3, 0.9);
 }
 
 .service-status-icon {
@@ -200,8 +355,9 @@ window.roxy-command-center {
 
 /* === GPU Card === */
 .gpu-card {
-    background-color: @card_bg_color;
-    border-radius: 12px;
+    background-color: alpha(@moc_surface_2, 0.92);
+    border: 1px solid alpha(@moc_line_0, 0.75);
+    border-radius: 8px;
     padding: 16px;
     margin: 8px;
 }
@@ -280,8 +436,9 @@ progressbar.usage-low progress {
 }
 
 .stat-card {
-    background-color: @card_bg_color;
-    border-radius: 12px;
+    background-color: alpha(@moc_surface_2, 0.92);
+    border: 1px solid alpha(@moc_line_0, 0.75);
+    border-radius: 8px;
     padding: 16px;
     margin: 4px;
 }
@@ -321,14 +478,15 @@ progressbar.usage-low progress {
 }
 
 .model-card {
-    background-color: @card_bg_color;
+    background-color: alpha(@moc_surface_2, 0.92);
+    border: 1px solid alpha(@moc_line_0, 0.75);
     border-radius: 8px;
     padding: 12px;
     margin: 4px 0;
 }
 
 .model-card:hover {
-    background-color: alpha(@view_fg_color, 0.04);
+    background-color: alpha(@moc_surface_3, 0.9);
 }
 
 .model-name {
@@ -405,35 +563,38 @@ progressbar.usage-low progress {
 }
 
 .overview-card {
-    background-color: @card_bg_color;
-    border-radius: 16px;
+    background-color: alpha(@moc_surface_2, 0.92);
+    border: 1px solid alpha(@moc_line_0, 0.75);
+    border-radius: 8px;
     padding: 20px;
     min-height: 120px;
 }
 
 .overview-card:hover {
-    background-color: alpha(@view_fg_color, 0.04);
+    background-color: alpha(@moc_surface_3, 0.9);
 }
 
 .overview-title {
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 700;
     margin-bottom: 8px;
+    color: @moc_ink_1;
 }
 
 .overview-value {
     font-size: 32px;
     font-weight: bold;
+    color: @moc_ink_0;
 }
 
 .overview-subtitle {
     font-size: 12px;
-    color: @dim_label_color;
+    color: @moc_ink_2;
 }
 
 /* === Graphs === */
 .graph-widget {
-    background-color: alpha(@view_fg_color, 0.03);
+    background-color: alpha(@moc_surface_0, 0.55);
     border-radius: 8px;
     min-height: 80px;
 }
@@ -457,7 +618,6 @@ scrollbar slider:hover {
 /* === Settings === */
 .settings-page {
     padding: 24px;
-    max-width: 600px;
 }
 
 .settings-group {
@@ -511,21 +671,269 @@ scrollbar slider:hover {
     animation: pulse 1.5s ease-in-out infinite;
 }
 
-/* === Responsive === */
-@media (max-width: 600px) {
-    .navigation-sidebar {
-        width: 60px;
-    }
-    
-    .nav-button label {
-        display: none;
-    }
-    
-    .overview-card {
-        padding: 12px;
-    }
-    
-    .overview-value {
-        font-size: 24px;
-    }
+/* =============================================================================
+   HOME CONSOLE PAGE - Talk + Triage + Execute
+   ============================================================================= */
+
+/* Column backgrounds */
+.triage-column,
+.execute-column {
+    background-color: @sidebar_bg_color;
 }
+
+.talk-column {
+    background-color: @view_bg_color;
+}
+
+.sidebar-pane {
+    border-color: @borders;
+}
+
+/* === Device Cards (Performance Page) === */
+.device-card {
+    background-color: @card_bg_color;
+    border-radius: 12px;
+    padding: 12px;
+    min-height: 100px;
+    border-left: 3px solid transparent;
+}
+
+.device-card.status-healthy {
+    border-left-color: @success_color;
+}
+
+.device-card.status-warn {
+    border-left-color: @warning_color;
+}
+
+.device-card.status-blocked {
+    border-left-color: @error_color;
+}
+
+.device-title {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.device-value {
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.device-subtitle {
+    font-size: 11px;
+    color: @dim_label_color;
+}
+
+/* === Agent Badges === */
+.agent-active {
+    background-color: alpha(@success_color, 0.08);
+}
+
+.agent-idle {
+    background-color: alpha(@warning_color, 0.08);
+}
+
+.agent-abandoned {
+    background-color: alpha(@error_color, 0.08);
+}
+
+/* === Process Tables === */
+.process-header {
+    background-color: alpha(@view_fg_color, 0.03);
+    border-radius: 6px;
+    padding: 4px;
+}
+
+.process-row {
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+
+.process-row:hover {
+    background-color: alpha(@view_fg_color, 0.04);
+}
+
+.process-suspicious {
+    background-color: alpha(@error_color, 0.08);
+    border-left: 2px solid @error_color;
+}
+
+.monospace-small {
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.status-healthy-text {
+    color: @success_color;
+}
+
+.status-warn-text {
+    color: @warning_color;
+}
+
+.status-blocked-text {
+    color: @error_color;
+}
+
+/* === Inbox Thread Row === */
+.inbox-thread-row {
+    border-radius: 8px;
+    margin: 4px 8px;
+}
+
+.inbox-thread-row:hover {
+    background-color: alpha(@view_fg_color, 0.05);
+}
+
+.inbox-thread-row:selected {
+    background-color: alpha(@accent_bg_color, 0.15);
+}
+
+/* === Identity Chips === */
+.identity-chip {
+    border-radius: 16px;
+    padding: 4px 12px;
+    font-size: 12px;
+}
+
+.identity-chip.suggested-action {
+    background-color: alpha(@accent_bg_color, 0.2);
+}
+
+/* === Suggested Action Pills === */
+button.pill {
+    border-radius: 16px;
+    padding: 2px 12px;
+    font-size: 11px;
+}
+
+/* === Chat Bubbles === */
+.chat-bubble {
+    padding: 12px 16px;
+    border-radius: 16px;
+    margin-bottom: 4px;
+}
+
+.user-bubble {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+    border-bottom-right-radius: 4px;
+}
+
+.assistant-bubble {
+    background-color: alpha(@view_fg_color, 0.08);
+    border-bottom-left-radius: 4px;
+}
+
+.system-message {
+    padding: 8px 16px;
+    opacity: 0.7;
+}
+
+/* === Connection Status Chips === */
+.talk-column .caption {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: alpha(@view_fg_color, 0.05);
+}
+
+/* === Typing Indicator === */
+.talk-column spinner {
+    min-width: 16px;
+    min-height: 16px;
+}
+
+/* === Speak Toggle Button === */
+.talk-column togglebutton:checked {
+    background-color: alpha(@accent_bg_color, 0.3);
+}
+
+/* === Execution Run Cards === */
+.execute-column .card {
+    background-color: @card_bg_color;
+    border-radius: 12px;
+}
+
+/* === Priority Badges === */
+label.error {
+    color: @alert_critical;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+label.warning {
+    color: @alert_warning;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+label.success {
+    color: @mode_local;
+}
+
+label.accent {
+    color: @accent_color;
+    font-weight: bold;
+}
+
+/* === Mode Toggle Buttons === */
+.talk-column .linked button {
+    min-width: 60px;
+}
+
+/* === Progress Bar in Runs === */
+.execute-column progressbar {
+    min-height: 8px;
+}
+
+.execute-column progressbar progress {
+    border-radius: 4px;
+    background-color: @accent_bg_color;
+}
+
+/* === Compact Mode (GWD 15" 1920×1080) === */
+window.compact-mode .navigation-sidebar {
+    min-width: 160px;
+}
+
+window.compact-mode .nav-button {
+    padding: 6px 8px;
+    min-height: 32px;
+    font-size: 12px;
+}
+
+window.compact-mode .nav-button image {
+    -gtk-icon-size: 16px;
+}
+
+window.compact-mode .title-2 {
+    font-size: 16px;
+}
+
+window.compact-mode .triage-column {
+    min-width: 240px;
+}
+
+window.compact-mode .talk-column {
+    min-width: 300px;
+}
+
+window.compact-mode .inbox-thread-row {
+    padding: 4px 0;
+}
+
+window.compact-mode .chat-bubble {
+    padding: 6px 10px;
+}
+
+window.compact-mode .progression-card {
+    padding: 8px;
+}
+
+window.compact-mode .overview-card {
+    padding: 10px;
+    min-height: 80px;
+}
+
+/* card-grid spacing handled in widget code */

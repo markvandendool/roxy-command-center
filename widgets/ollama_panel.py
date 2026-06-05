@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Ollama panel widget with pool tabs.
-ROXY-CMD-STORY-015: Pool tabs (BIG/FAST), model list, VRAM display.
+Ollama panel widget for the current single-service ROXY runtime.
 """
 
 import gi
@@ -43,11 +42,11 @@ class ModelCard(Gtk.Box):
         
         self.append(info_box)
         
-        # Unload button
-        unload_btn = Gtk.Button(label="Unload")
-        unload_btn.add_css_class("destructive-action")
-        unload_btn.connect("clicked", self._on_unload_clicked)
-        self.append(unload_btn)
+        readonly = Gtk.Label(label="Read-only")
+        readonly.add_css_class("pill")
+        readonly.add_css_class("dim-label")
+        readonly.set_tooltip_text("Review build: model unload is disabled")
+        self.append(readonly)
     
     def _on_unload_clicked(self, button):
         """Handle unload button click."""
@@ -158,19 +157,20 @@ class PoolTab(Gtk.Box):
 
 class OllamaPanel(Gtk.Box):
     """
-    Ollama management panel with pool tabs.
-    
+    Ollama management panel for the current ROXY service.
+
     Shows:
-    - BIG pool tab (port 11434)
-    - FAST pool tab (port 11435)
+    - one ROXY Ollama endpoint on port 11434
     - Model list per pool
     - Unload actions
     """
-    
-    def __init__(self, on_model_unload: Optional[Callable[[str, str], None]] = None):
+
+    def __init__(self, on_model_unload: Optional[Callable[[str, str], None]] = None,
+                 on_refresh: Optional[Callable[[], None]] = None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        
+
         self.on_model_unload = on_model_unload
+        self.on_refresh = on_refresh
         
         # Card styling
         self.add_css_class("card")
@@ -185,7 +185,7 @@ class OllamaPanel(Gtk.Box):
         header.set_margin_start(12)
         header.set_margin_end(12)
         
-        title = Gtk.Label(label="Ollama Pools")
+        title = Gtk.Label(label="Ollama")
         title.add_css_class("title-3")
         title.set_halign(Gtk.Align.START)
         title.set_hexpand(True)
@@ -204,24 +204,20 @@ class OllamaPanel(Gtk.Box):
         self.notebook = Gtk.Notebook()
         self.notebook.set_margin_top(8)
         
-        # BIG pool tab
-        self.big_tab = PoolTab("BIG", 11434, self._on_model_unload_request)
-        big_label = Gtk.Label(label="BIG (:11434)")
-        big_label.add_css_class("accent-big")
-        self.notebook.append_page(self.big_tab, big_label)
-        
-        # FAST pool tab
-        self.fast_tab = PoolTab("FAST", 11435, self._on_model_unload_request)
-        fast_label = Gtk.Label(label="FAST (:11435)")
-        fast_label.add_css_class("accent-fast")
-        self.notebook.append_page(self.fast_tab, fast_label)
+        self.roxy_tab = PoolTab("ROXY", 11434, self._on_model_unload_request)
+        roxy_label = Gtk.Label(label="ROXY (:11434)")
+        roxy_label.add_css_class("accent-big")
+        self.notebook.append_page(self.roxy_tab, roxy_label)
         
         self.append(self.notebook)
     
     def _on_refresh_clicked(self, button):
         """Handle refresh button click."""
-        # Will be called by parent's update cycle
-        pass
+        if self.on_refresh:
+            self.on_refresh()
+        # Also visually indicate refresh is happening
+        button.set_sensitive(False)
+        GLib.timeout_add(500, lambda: button.set_sensitive(True) or False)
     
     def _on_model_unload_request(self, pool: str, model: str):
         """Handle model unload request with confirmation."""
@@ -249,24 +245,13 @@ class OllamaPanel(Gtk.Box):
     def update_from_daemon(self, data: dict):
         """Update from daemon response."""
         services = data.get("services", {})
-        
-        # BIG pool (ollama_big)
-        big_service = services.get("ollama_big", {})
-        big_health = big_service.get("health", "unknown")
-        big_models = data.get("ollama_big_models", [])
-        big_vram = sum(m.get("vram_gb", 0) for m in big_models)
-        
-        self.big_tab.set_status(big_health, len(big_models), big_vram)
-        self.big_tab.update_models(big_models)
-        
-        # FAST pool (ollama_fast)
-        fast_service = services.get("ollama_fast", {})
-        fast_health = fast_service.get("health", "unknown")
-        fast_models = data.get("ollama_fast_models", [])
-        fast_vram = sum(m.get("vram_gb", 0) for m in fast_models)
-        
-        self.fast_tab.set_status(fast_health, len(fast_models), fast_vram)
-        self.fast_tab.update_models(fast_models)
+        ollama_service = services.get("ollama", {})
+        health = ollama_service.get("health", "unknown")
+        models = data.get("ollama_models", data.get("models", []))
+        vram = sum(m.get("vram_gb", 0) for m in models)
+
+        self.roxy_tab.set_status(health, len(models), vram)
+        self.roxy_tab.update_models(models)
     
     def update(self, data: dict):
         """Alias for update_from_daemon - compatibility method."""

@@ -8,17 +8,17 @@ GTK4/Libadwaita desktop application for ROXY AI workstation monitoring and contr
 
 ## Features
 
-- **GPU Monitoring** - Dual AMD GPU support (6900 XT "BIG" / W5700X "FAST")
-- **Service Management** - Ollama pools, Roxy services with start/stop/restart
+- **GPU Monitoring** - Current ROXY status view
+- **Service Management** - Read-only service status for this review build
 - **Alert System** - Temperature, VRAM, and health thresholds
-- **Sleep Button** - Gracefully stops services before system sleep
+- **Sleep Button** - Disabled in this review build
 - **Modern UI** - Native GTK4/Libadwaita with dark mode support
 
 ## Requirements
 
 - Python 3.8+
 - GTK4 & Libadwaita (`python3-gi`, `gir1.2-adw-1`)
-- Working `roxy-panel-daemon.py`
+- Current ROXY runtime with `ollama.service` on `127.0.0.1:11434`
 
 ## Installation
 
@@ -62,12 +62,10 @@ python3 main.py
 ./launch.sh
 ```
 
-### Sleep Button
-The moon icon in the header gracefully:
-1. Stops Ollama BIG service
-2. Stops Ollama FAST service  
-3. Waits for GPUs to cool
-4. Initiates system suspend
+### Review Safety
+This adaptation is not installed as a production authority layer. Service
+mutations and system sleep are disabled. Ollama is mapped to the current single
+service on `127.0.0.1:11434`.
 
 ## License
 

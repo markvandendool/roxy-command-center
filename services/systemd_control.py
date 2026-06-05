@@ -46,14 +46,19 @@ class SystemdControl:
     - Action cooldown tracking
     """
     
+    # This adaptation is review-only. System state is observable, but this app
+    # must not mutate services until a separate production-control ticket exists.
+    READ_ONLY = True
+
     # Known Roxy services
+    # Maps display names to actual systemd unit names
     KNOWN_SERVICES = {
-        "roxy-core": "roxy-core.service",
-        "roxy_core": "roxy-core.service",
-        "ollama-big": "ollama-big.service",
-        "ollama_big": "ollama-big.service",
-        "ollama-fast": "ollama-fast.service",
-        "ollama_fast": "ollama-fast.service",
+        # Current ROXY runtime services.
+        "ollama": "ollama.service",
+        "docker": "docker.service",
+        "roxy-law0": "roxy-law0.service",
+        "roxy_law0": "roxy-law0.service",
+        "network": "NetworkManager.service",
     }
     
     def __init__(self):
@@ -254,6 +259,14 @@ class SystemdControl:
     def _do_action_sync(self, service: str, method: str, action_name: str) -> ServiceAction:
         """Synchronous service action (runs in worker thread)."""
         unit_name = self.normalize_service_name(service)
+        if self.READ_ONLY:
+            return ServiceAction(
+                service=service,
+                action=action_name,
+                result=ActionResult.ACCESS_DENIED,
+                message=f"Read-only review build: {action_name} disabled for {unit_name}"
+            )
+
         scope = self.detect_scope(service)
         
         if scope == ServiceScope.UNKNOWN:

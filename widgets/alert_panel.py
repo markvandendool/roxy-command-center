@@ -203,8 +203,8 @@ class AlertPanel(Gtk.Box):
         empty_desc.add_css_class("dim-label")
         empty_box.append(empty_desc)
         
-        # Start refresh timer
-        GLib.timeout_add_seconds(5, self._on_refresh_timer)
+        # Review-only observer build: no periodic alert refresh timer.
+        # Alert callbacks still update the UI when this process creates alerts.
     
     def _refresh_alerts(self):
         """Refresh the alert list."""
@@ -268,9 +268,9 @@ class AlertPanel(Gtk.Box):
         self._refresh_alerts()
     
     def _on_refresh_timer(self) -> bool:
-        """Periodic refresh for time display."""
+        """Disabled periodic refresh hook retained for compatibility."""
         self._refresh_alerts()
-        return True  # Continue timer
+        return False
     
     def get_badge_widget(self) -> Gtk.Widget:
         """Get a badge widget for use in navigation."""
@@ -294,7 +294,7 @@ class AlertBadge(Gtk.Label):
         self.set_visible(False)
         
         self._update()
-        GLib.timeout_add_seconds(5, self._on_timer)
+        # Review-only observer build: no recurring badge timer.
     
     def _update(self):
         count = self.alert_manager.get_alert_count()
@@ -316,4 +316,4 @@ class AlertBadge(Gtk.Label):
     
     def _on_timer(self) -> bool:
         self._update()
-        return True
+        return False

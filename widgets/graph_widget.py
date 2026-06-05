@@ -313,39 +313,118 @@ class MultiGraphWidget(Gtk.Box):
         return self._graphs.get(name)
 
 
+class CircularProgressWidget(Gtk.DrawingArea):
+    """
+    Compact circular progress meter (donut style).
+    
+    Features:
+    - Donut arc with center text + icon
+    - Color-coded by severity (green/yellow/red)
+    - Compact: ~110x110px vs long bars that eat horizontal real estate
+    - Cairo-drawn, no external deps
+    """
+    
+    def __init__(self, size: int = 110, line_width: float = 8.0):
+        super().__init__()
+        self.add_css_class("circular-progress")
+        self.set_size_request(size, size)
+        self.set_draw_func(self._on_draw)
+        
+        self._size = size
+        self._line_width = line_width
+        self._pct = 0.0
+        self._label = ""
+        self._subtitle = ""
+        self._icon_name = ""
+        self._status = "healthy"  # healthy | warn | blocked
+    
+    def set_value(self, pct: float, label: str = "", subtitle: str = "", icon_name: str = "", status: str = ""):
+        """Update meter value and content."""
+        self._pct = max(0.0, min(100.0, pct))
+        self._label = label
+        self._subtitle = subtitle
+        self._icon_name = icon_name
+        if status in ("healthy", "warn", "blocked"):
+            self._status = status
+        self.queue_draw()
+    
+    def _color_for_status(self) -> Tuple[float, float, float]:
+        if self._status == "blocked":
+            return (0.93, 0.27, 0.27)  # Red
+        elif self._status == "warn":
+            return (0.96, 0.62, 0.04)  # Orange
+        return (0.13, 0.77, 0.37)  # Green
+    
+    def _on_draw(self, area, cr: cairo.Context, width: int, height: int):
+        if width <= 0 or height <= 0:
+            return
+        
+        cx = width / 2.0
+        cy = height / 2.0
+        radius = min(cx, cy) - self._line_width - 4
+        
+        # Background track
+        cr.arc(cx, cy, radius, 0, 2 * math.pi)
+        cr.set_source_rgba(0.25, 0.25, 0.25, 0.5)
+        cr.set_line_width(self._line_width)
+        cr.stroke()
+        
+        # Progress arc (start at top = -pi/2)
+        if self._pct > 0:
+            start_angle = -math.pi / 2
+            end_angle = start_angle + (2 * math.pi * self._pct / 100.0)
+            cr.arc(cx, cy, radius, start_angle, end_angle)
+            color = self._color_for_status()
+            cr.set_source_rgb(*color)
+            cr.set_line_width(self._line_width)
+            cr.set_line_cap(cairo.LineCap.ROUND)
+            cr.stroke()
+        
+        # Center text
+        cr.set_source_rgb(0.9, 0.9, 0.9)
+        
+        if self._label:
+            # Main label (percentage or value)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(16)
+            ext = cr.text_extents(self._label)
+            cr.move_to(cx - ext.width / 2, cy - 2)
+            cr.show_text(self._label)
+        
+        if self._subtitle:
+            # Subtitle below
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+            cr.set_font_size(9)
+            cr.set_source_rgb(0.6, 0.6, 0.6)
+            ext = cr.text_extents(self._subtitle)
+            cr.move_to(cx - ext.width / 2, cy + 14)
+            cr.show_text(self._subtitle)
+
+
 class SparklineWidget(Gtk.DrawingArea):
     """
     Compact sparkline graph for inline display.
     
-    Features:
-    - Minimal design
-    - No labels
-    - Compact size
+    Renders external history only. Never fabricates data.
+    If history has < 2 real points, renders nothing.
     """
     
-    def __init__(self, history_size: int = 30, color: Tuple[float, float, float] = (0.486, 0.227, 0.929)):
+    def __init__(self, color: Tuple[float, float, float] = (0.486, 0.227, 0.929)):
         super().__init__()
         self.add_css_class("sparkline")
-        
-        self._data: deque = deque(maxlen=history_size)
+        self._history: List[float] = []
         self._color = color
-        
-        # Compact size
         self.set_size_request(80, 24)
         self.set_draw_func(self._on_draw)
-        
-        # Initialize
-        for _ in range(history_size):
-            self._data.append(0.0)
     
-    def add_value(self, value: float):
-        """Add a value."""
-        self._data.append(value)
+    def set_history(self, history: List[float]):
+        """Set external history. Must be real samples — no synthetic padding."""
+        self._history = list(history)
         self.queue_draw()
     
     def _on_draw(self, area, cr: cairo.Context, width: int, height: int):
-        """Draw sparkline."""
-        if width <= 0 or height <= 0 or len(self._data) < 2:
+        """Draw sparkline from real history only."""
+        if width <= 0 or height <= 0 or len(self._history) < 2:
             return
         
         margin = 2
@@ -353,14 +432,15 @@ class SparklineWidget(Gtk.DrawingArea):
         h = height - (margin * 2)
         
         # Find range
-        min_val = min(self._data)
-        max_val = max(self._data)
+        min_val = min(self._history)
+        max_val = max(self._history)
         value_range = max_val - min_val if max_val > min_val else 1
         
         # Build path
         points = []
-        for i, value in enumerate(self._data):
-            px = margin + (w * i / (len(self._data) - 1))
+        n = len(self._history)
+        for i, value in enumerate(self._history):
+            px = margin + (w * i / (n - 1))
             normalized = (value - min_val) / value_range
             py = margin + h - (h * normalized)
             points.append((px, py))

@@ -142,9 +142,16 @@ class HeaderBar:
         self.refresh_btn.connect("clicked", self._on_refresh_clicked)
         self._widget.pack_end(self.refresh_btn)
         
-        # Sleep button - graceful system sleep
+        # Debug info label (shows CPU/GPU status)
+        self.debug_label = Gtk.Label(label="CPU:-- GPU:--")
+        self.debug_label.add_css_class("dim-label")
+        self.debug_label.add_css_class("caption")
+        self.debug_label.set_margin_start(8)
+        self._widget.pack_start(self.debug_label)
+        
+        # Sleep button remains visible but disabled for this review-only build.
         self.sleep_btn = Gtk.Button.new_from_icon_name("weather-clear-night-symbolic")
-        self.sleep_btn.set_tooltip_text("Sleep System (gracefully stops services)")
+        self.sleep_btn.set_tooltip_text("Read-only review build: system sleep is disabled")
         self.sleep_btn.connect("clicked", self._on_sleep_clicked)
         self._widget.pack_start(self.sleep_btn)
     
@@ -179,6 +186,13 @@ class HeaderBar:
         """Set custom subtitle text."""
         self.subtitle_label.set_label(text)
     
+    def set_debug_info(self, cpu_pct: float, gpu_count: int):
+        """Update debug info strip showing CPU/GPU status."""
+        import time
+        ts = time.strftime("%H:%M:%S")
+        cpu_str = f"{cpu_pct:.0f}%" if cpu_pct else "N/A"
+        self.debug_label.set_text(f"CPU:{cpu_str} GPU:{gpu_count} @{ts}")
+    
     def _on_settings_clicked(self, button):
         if self.on_settings:
             self.on_settings()
@@ -195,74 +209,24 @@ class HeaderBar:
             window.refresh()
     
     def _on_sleep_clicked(self, button):
-        """Handle sleep button - show confirmation dialog."""
+        """Show read-only notice instead of mutating system power state."""
         window = self._widget.get_root()
         if not isinstance(window, Gtk.Window):
+            print("[HeaderBar] Read-only review build: sleep disabled")
             return
         
         dialog = Adw.MessageDialog(
             transient_for=window,
-            heading="Sleep System?",
-            body="This will gracefully stop Ollama services and put the system to sleep. GPUs will cool down safely."
+            heading="Read-Only Review Build",
+            body="System sleep is disabled in this review build. Use normal OS controls outside Command Center."
         )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("sleep", "Sleep Now")
-        dialog.set_response_appearance("sleep", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("cancel")
-        
-        dialog.connect("response", self._on_sleep_response)
+        dialog.add_response("ok", "OK")
         dialog.present()
-    
-    def _on_sleep_response(self, dialog, response):
-        """Handle sleep dialog response."""
-        if response != "sleep":
-            return
-        
-        # Get window for status updates
-        window = self._widget.get_root()
-        
-        # Perform graceful shutdown sequence
-        import subprocess
-        import threading
-        
-        def do_sleep():
-            try:
-                # Step 1: Stop Ollama services gracefully
-                subprocess.run(
-                    ["systemctl", "--user", "stop", "ollama-big.service"],
-                    timeout=10, capture_output=True
-                )
-                subprocess.run(
-                    ["systemctl", "--user", "stop", "ollama-fast.service"],
-                    timeout=10, capture_output=True
-                )
-                
-                # Step 2: Let GPUs cool down briefly
-                import time
-                time.sleep(2)
-                
-                # Step 3: Initiate system sleep
-                subprocess.run(
-                    ["systemctl", "suspend"],
-                    timeout=10, capture_output=True
-                )
-            except Exception as e:
-                print(f"[Sleep] Error: {e}")
-                GLib.idle_add(lambda: self._show_sleep_error(str(e)))
-        
-        # Run in thread to not block UI
-        thread = threading.Thread(target=do_sleep, daemon=True)
-        thread.start()
-        
-        # Update button to show in progress
-        self.sleep_btn.set_sensitive(False)
-        self.sleep_btn.set_tooltip_text("Sleeping...")
-        GLib.timeout_add(15000, lambda: self._reset_sleep_button() or False)
     
     def _reset_sleep_button(self):
         """Reset sleep button after timeout (in case sleep was cancelled)."""
         self.sleep_btn.set_sensitive(True)
-        self.sleep_btn.set_tooltip_text("Sleep System (gracefully stops services)")
+        self.sleep_btn.set_tooltip_text("Read-only review build: system sleep is disabled")
     
     def _show_sleep_error(self, error: str):
         """Show sleep error dialog."""

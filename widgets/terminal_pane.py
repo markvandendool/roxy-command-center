@@ -324,7 +324,7 @@ class QuickActionsBar(Gtk.Box):
             ("Journal", "journalctl --user -n 50 --no-pager"),
             ("Top", "top -bn1 | head -20"),
             ("GPU", "cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null || nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader"),
-            ("Ollama", "curl -s http://localhost:11434/api/tags | jq -r '.models[].name' 2>/dev/null || echo 'Ollama not responding'"),
+            ("Ollama", "curl -s http://127.0.0.1:11434/api/tags | jq -r '.models[].name' 2>/dev/null || echo 'Ollama not responding'"),
         ]
         
         for label_text, command in quick_actions:

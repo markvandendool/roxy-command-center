@@ -305,8 +305,20 @@ class GpuMonitor:
         
         return None
     
+    # Known AMD device ID → marketing name map
+    _AMD_NAME_MAP = {
+        ("0x1002", "0x73bf"): "AMD Radeon RX 6900 XT",
+        ("0x1002", "0x73df"): "AMD Radeon RX 6800 XT",
+        ("0x1002", "0x73c0"): "AMD Radeon RX 6800",
+        ("0x1002", "0x73e1"): "AMD Radeon RX 6700 XT",
+        ("0x1002", "0x73ff"): "AMD Radeon RX 6600 XT",
+        ("0x1002", "0x7310"): "AMD Radeon Pro W5700X",
+        ("0x1002", "0x164d"): "AMD Radeon Graphics",
+        ("0x1002", "0x1681"): "AMD Radeon 780M",
+    }
+
     def _get_amd_gpu_name(self, device_path: Path) -> str:
-        """Get AMD GPU name from marketing name or product."""
+        """Get AMD GPU name from marketing name or device ID lookup."""
         # Try marketing name first
         marketing = device_path / "product_name"
         if marketing.exists():
@@ -316,7 +328,7 @@ class GpuMonitor:
             except:
                 pass
         
-        # Try vendor/device ID lookup
+        # Try vendor/device ID lookup with known-name map
         vendor_path = device_path / "vendor"
         device_id_path = device_path / "device"
         
@@ -326,6 +338,9 @@ class GpuMonitor:
                     vendor = f.read().strip()
                 with open(device_id_path) as f:
                     device = f.read().strip()
+                key = (vendor.lower(), device.lower())
+                if key in self._AMD_NAME_MAP:
+                    return self._AMD_NAME_MAP[key]
                 return f"AMD GPU ({vendor}:{device})"
             except:
                 pass

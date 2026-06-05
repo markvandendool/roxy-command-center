@@ -12,4 +12,7 @@ pkill -f "python3 main.py" 2>/dev/null
 sleep 0.3
 
 # Launch with proper environment
-exec python3 main.py "$@"
+# Use X11 backend for GTK4 compatibility on Wayland compositors
+# Use venv python to ensure PyGObject access via system site-packages
+export GDK_BACKEND=x11
+exec "$HOME/.roxy/venv/bin/python" main.py "$@"

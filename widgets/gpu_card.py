@@ -132,7 +132,7 @@ class GPUCard(Gtk.Box):
         self.set_values(0, 0, 0, 0, 0)
     
     def set_pool(self, pool: Optional[str]):
-        """Set the pool assignment (BIG/FAST)."""
+        """Set the current runtime badge."""
         self._pool = pool
         
         if pool:
@@ -143,10 +143,8 @@ class GPUCard(Gtk.Box):
             self.pool_badge.remove_css_class("accent-big")
             self.pool_badge.remove_css_class("accent-fast")
             
-            if pool.lower() == "big":
+            if pool.lower() in ("roxy", "ollama"):
                 self.pool_badge.add_css_class("accent-big")  # Red
-            elif pool.lower() == "fast":
-                self.pool_badge.add_css_class("accent-fast")  # Blue
         else:
             self.pool_badge.set_visible(False)
     
@@ -203,12 +201,9 @@ class GPUCard(Gtk.Box):
             self.gpu_name = name
             self.name_label.set_text(name)
         
-        # Detect pool from index (6900 XT = BIG, W5700X = FAST)
-        # This is a heuristic - could be improved with explicit mapping
-        if "6900" in name:
-            self.set_pool("BIG")
-        elif "5700" in name or "W5700" in name:
-            self.set_pool("FAST")
+        # Current ROXY adaptation exposes one Ollama runtime on port 11434.
+        if "6900" in name or "5700" in name or "W5700" in name:
+            self.set_pool("ROXY")
         
         self.set_values(vram_used, vram_total, temp, util, power)
     

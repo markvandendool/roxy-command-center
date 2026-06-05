@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Roxy Command Center
+Comment=GTK4 Control Panel for Roxy AI Workstation
+GenericName=System Monitor
+Exec=/home/mark/roxy-command-center/launch.sh
+Icon=/home/mark/roxy-command-center/assets/roxy-command-center.svg
+Terminal=false
+Type=Application
+Categories=System;Monitor;Utility;
+Keywords=roxy;gpu;ollama;monitor;control;ai;
+StartupNotify=true
+StartupWMClass=org.roxy.CommandCenter

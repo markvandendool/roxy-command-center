@@ -42,11 +42,23 @@ class NavigationSidebar(Gtk.Box):
         main_section.set_vexpand(True)
         self.append(main_section)
         
-        # Navigation items
+        # Navigation items — LifePanel layout
         nav_items = [
+            ("home", "go-home-symbolic", "Home"),
             ("overview", "view-grid-symbolic", "Overview"),
+            ("performance", "preferences-system-symbolic", "Performance"),
+            ("apps", "applications-utilities-symbolic", "Apps"),
+            ("agents", "applications-games-symbolic", "Agents"),
+            ("brain", "brain-symbolic" if False else "preferences-system-symbolic", "Brain"),
+            ("executive", "emblem-important-symbolic" if False else "emblem-ok-symbolic", "Executive"),
+            ("voice_actions", "audio-input-microphone-symbolic", "Voice / Actions"),
+            ("content", "folder-music-symbolic", "Content"),
+            ("receipts", "document-signed-symbolic" if False else "emblem-ok-symbolic", "Receipts"),
+            ("storage", "drive-harddisk-symbolic", "Storage"),
             ("services", "system-run-symbolic", "Services"),
             ("gpus", "video-display-symbolic", "GPUs"),
+            ("roxy_status", "emblem-ok-symbolic", "Roxy Status"),
+            ("mos_cockpit", "network-workgroup-symbolic", "MOS Cockpit"),
             ("ollama", "face-smile-big-symbolic", "Ollama"),
             ("alerts", "dialog-warning-symbolic", "Alerts"),
             ("terminal", "utilities-terminal-symbolic", "Terminal"),

@@ -18,13 +18,13 @@ from services.systemd_control import get_systemd, ServiceAction, ActionResult
 
 class ServiceCard(Gtk.Box):
     """
-    Service status card with action buttons.
+    Service status card.
     
     Shows:
     - Service name and port
     - Status icon (running/stopped/error)
     - Health indicator
-    - Start/Stop/Restart buttons with confirmation
+    - Start/Stop/Restart buttons are disabled in this review-only build
     """
     
     def __init__(self, 
@@ -105,15 +105,18 @@ class ServiceCard(Gtk.Box):
         
         self.start_button = Gtk.Button(label="Start")
         self.start_button.add_css_class("suggested-action")
+        self.start_button.set_tooltip_text("Read-only review build: service start is disabled")
         self.start_button.connect("clicked", self._on_start_clicked)
         button_row.append(self.start_button)
         
         self.stop_button = Gtk.Button(label="Stop")
         self.stop_button.add_css_class("destructive-action")
+        self.stop_button.set_tooltip_text("Read-only review build: service stop is disabled")
         self.stop_button.connect("clicked", self._on_stop_clicked)
         button_row.append(self.stop_button)
         
         self.restart_button = Gtk.Button(label="Restart")
+        self.restart_button.set_tooltip_text("Read-only review build: service restart is disabled")
         self.restart_button.connect("clicked", self._on_restart_clicked)
         button_row.append(self.restart_button)
         
@@ -132,6 +135,7 @@ class ServiceCard(Gtk.Box):
         
         # Initial state
         self.set_status("unknown", "unknown")
+        self._disable_buttons()
     
     def set_status(self, status: str, health: str = "unknown"):
         """
@@ -166,6 +170,8 @@ class ServiceCard(Gtk.Box):
         else:
             self.status_icon.set_from_icon_name("dialog-question-symbolic")
             self.status_label.set_text(status.title() if status else "Unknown")
+
+        self._disable_buttons()
         
         # Health badge
         if health == "healthy" or health == "ok":
@@ -259,20 +265,8 @@ class ServiceCard(Gtk.Box):
         self.restart_button.set_sensitive(False)
     
     def _start_cooldown_timer(self):
-        """Start timer to re-enable buttons after cooldown."""
-        if self._cooldown_timer:
-            GLib.source_remove(self._cooldown_timer)
-        
-        def update_cooldown():
-            if self._check_cooldown():
-                return True  # Continue timer
-            else:
-                self._cooldown_timer = None
-                # Refresh status to enable appropriate buttons
-                self._refresh_status()
-                return False  # Stop timer
-        
-        self._cooldown_timer = GLib.timeout_add(500, update_cooldown)
+        """Cooldown timers are disabled in this read-only observer build."""
+        self._cooldown_timer = None
     
     def _refresh_status(self):
         """Refresh service status from systemd."""
@@ -333,6 +327,8 @@ class ServiceCard(Gtk.Box):
     
     def _on_start_clicked(self, button):
         """Handle start button click."""
+        self._show_read_only_notice("start")
+        return
         if self._check_cooldown():
             return
         
@@ -346,6 +342,8 @@ class ServiceCard(Gtk.Box):
     
     def _on_stop_clicked(self, button):
         """Handle stop button click."""
+        self._show_read_only_notice("stop")
+        return
         if self._check_cooldown():
             return
         
@@ -359,6 +357,8 @@ class ServiceCard(Gtk.Box):
     
     def _on_restart_clicked(self, button):
         """Handle restart button click."""
+        self._show_read_only_notice("restart")
+        return
         if self._check_cooldown():
             return
         
@@ -369,3 +369,18 @@ class ServiceCard(Gtk.Box):
             systemd.restart_service(self.service_name, self._on_action_complete)
         
         self._show_confirmation("restart", do_restart)
+
+    def _show_read_only_notice(self, action: str):
+        """Explain why mutation controls are disabled."""
+        window = self.get_root()
+        if not isinstance(window, Gtk.Window):
+            print(f"[ServiceCard] Read-only review build: {action} disabled for {self.service_name}")
+            return
+
+        dialog = Adw.MessageDialog(
+            transient_for=window,
+            heading="Read-Only Review Build",
+            body=f"{action.title()} is disabled for {self.display_name}. This build observes ROXY only."
+        )
+        dialog.add_response("ok", "OK")
+        dialog.present()
