@@ -89,6 +89,8 @@ class ChatMessage:
     # Context Inspector metadata (JARVIS Context Kernel)
     context_hash: str = ""
     context_kernel_version: str = ""
+    context_kernel_hash: str = ""
+    context_kernel: Dict[str, Any] = field(default_factory=dict)
     source_health: Dict[str, Any] = field(default_factory=dict)
     token_budget: Dict[str, Any] = field(default_factory=dict)
     orico_counts: Dict[str, Any] = field(default_factory=dict)
@@ -328,6 +330,8 @@ class ChatService:
                         "proposed_actions": m.proposed_actions,
                         "context_hash": m.context_hash,
                         "context_kernel_version": m.context_kernel_version,
+                        "context_kernel_hash": m.context_kernel_hash,
+                        "context_kernel": m.context_kernel,
                         "source_health": m.source_health,
                         "token_budget": m.token_budget,
                         "orico_counts": m.orico_counts,
@@ -361,6 +365,8 @@ class ChatService:
                     proposed_actions=m.get("proposed_actions", []),
                     context_hash=m.get("context_hash", ""),
                     context_kernel_version=m.get("context_kernel_version", ""),
+                    context_kernel_hash=m.get("context_kernel_hash", ""),
+                    context_kernel=m.get("context_kernel", {}),
                     source_health=m.get("source_health", {}),
                     token_budget=m.get("token_budget", {}),
                     orico_counts=m.get("orico_counts", {}),
@@ -786,6 +792,7 @@ class ChatService:
             memory_status = roxy_meta.get("memoryStatus", "")
             context_hash = roxy_meta.get("contextHash", "")
             context_kernel_version = roxy_meta.get("contextKernelVersion", "")
+            context_kernel_hash = roxy_meta.get("contextKernelHash", "")
             context_kernel = roxy_meta.get("contextKernel", {}) or {}
             source_health = context_kernel.get("sourceHealth", {}) or {}
             token_budget = context_kernel.get("tokenBudget", {}) or {}
@@ -813,6 +820,8 @@ class ChatService:
                 "proposed_actions_count": len(proposed_actions),
                 "context_hash": context_hash,
                 "context_kernel_version": context_kernel_version,
+                "context_kernel_hash": context_kernel_hash,
+                "context_kernel": context_kernel,
                 "source_health": source_health,
                 "token_budget": token_budget,
                 "orico_counts": orico_counts,
@@ -881,6 +890,8 @@ class ChatService:
                     proposed_actions=proposed_actions,
                     context_hash=context_hash,
                     context_kernel_version=context_kernel_version,
+                    context_kernel_hash=context_kernel_hash,
+                    context_kernel=context_kernel,
                     source_health=source_health,
                     token_budget=token_budget,
                     orico_counts=orico_counts,
@@ -909,6 +920,8 @@ class ChatService:
         proposed_actions: Optional[List[str]] = None,
         context_hash: str = "",
         context_kernel_version: str = "",
+        context_kernel_hash: str = "",
+        context_kernel: Optional[Dict[str, Any]] = None,
         source_health: Optional[Dict[str, Any]] = None,
         token_budget: Optional[Dict[str, Any]] = None,
         orico_counts: Optional[Dict[str, Any]] = None,
@@ -928,6 +941,8 @@ class ChatService:
             proposed_actions=proposed_actions or [],
             context_hash=context_hash,
             context_kernel_version=context_kernel_version,
+            context_kernel_hash=context_kernel_hash,
+            context_kernel=context_kernel or {},
             source_health=source_health or {},
             token_budget=token_budget or {},
             orico_counts=orico_counts or {},

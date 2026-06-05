@@ -304,10 +304,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._setup_pages()
         self.navigation.stack.connect("notify::visible-child-name", self._on_visible_page_changed)
         
-        # The hard-surface daily-driver opens on live LifePanel truth. The chat
-        # console remains available as a lazy page so mock triage/run scaffolding
-        # does not own the dedicated monitor at startup.
-        start_page = os.getenv("ROXY_CC_START_PAGE", "overview")
+        # The hard-surface daily-driver opens on Roxy chat so the operator can
+        # talk naturally first; Overview remains the LifePanel summary page.
+        start_page = os.getenv("ROXY_CC_START_PAGE", "home")
         self.navigation.navigate_to(start_page)
     
     def _setup_pages(self):
@@ -518,7 +517,7 @@ class MainWindow(Adw.ApplicationWindow):
             
             # If compact, still respect start page preference
             if self._compact_mode:
-                start_page = os.getenv("ROXY_CC_START_PAGE", "overview")
+                start_page = os.getenv("ROXY_CC_START_PAGE", "home")
                 print(f"[MainWindow] Compact mode: navigating to {start_page}")
                 GLib.idle_add(lambda: self.navigation.navigate_to(start_page) or False)
     

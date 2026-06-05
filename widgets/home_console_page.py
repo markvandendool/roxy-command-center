@@ -107,6 +107,8 @@ class ChatMessage:
     # Context Inspector metadata (JARVIS Context Kernel)
     context_hash: str = ""
     context_kernel_version: str = ""
+    context_kernel_hash: str = ""
+    context_kernel: Dict[str, Any] = None
     source_health: Dict[str, Any] = None
     token_budget: Dict[str, Any] = None
     orico_counts: Dict[str, Any] = None
@@ -120,6 +122,8 @@ class ChatMessage:
             self.proposed_actions = []
         if self.source_health is None:
             self.source_health = {}
+        if self.context_kernel is None:
+            self.context_kernel = {}
         if self.token_budget is None:
             self.token_budget = {}
         if self.orico_counts is None:
@@ -545,6 +549,18 @@ class ChatMessage_Widget(Gtk.Box):
         self.set_margin_top(8)
         self.set_margin_start(12)
         self.set_margin_end(12)
+
+        def _display_text(value: Any) -> str:
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                parts = []
+                for key in ("id", "type", "source", "title", "label", "path", "content", "text"):
+                    item = value.get(key)
+                    if item:
+                        parts.append(f"{key}={item}")
+                return " | ".join(parts) if parts else str(value)
+            return str(value)
         
         if message.role == "system":
             self.add_css_class("system-message")
@@ -620,6 +636,15 @@ class ChatMessage_Widget(Gtk.Box):
                     kv_chip.set_xalign(0)
                     kv_chip.set_tooltip_text(f"Context Kernel version: {message.context_kernel_version}")
                     header_row.append(kv_chip)
+
+                # Context kernel hash chip
+                if message.context_kernel_hash:
+                    kh_chip = Gtk.Label(label=f"🧬 {message.context_kernel_hash[:8]}")
+                    kh_chip.add_css_class("caption")
+                    kh_chip.add_css_class("dim-label")
+                    kh_chip.set_xalign(0)
+                    kh_chip.set_tooltip_text(f"Context Kernel hash: {message.context_kernel_hash}")
+                    header_row.append(kh_chip)
                 
                 # Degraded / bypass warning chip
                 if message.harness_bypassed:
@@ -660,7 +685,14 @@ class ChatMessage_Widget(Gtk.Box):
                     actions_box.append(btn)
             
             # Context Inspector evidence row (assistant only) — Phase 2: Expandable details
-            if not is_user and (message.context_hash or message.orico_counts or message.token_budget or message.source_health):
+            if not is_user and (
+                message.context_hash
+                or message.context_kernel_hash
+                or message.orico_counts
+                or message.token_budget
+                or message.source_health
+                or message.context_kernel
+            ):
                 evidence_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
                 evidence_frame.set_margin_top(6)
                 evidence_frame.set_margin_start(4)
@@ -672,11 +704,22 @@ class ChatMessage_Widget(Gtk.Box):
                 toggle_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
                 toggle_row.add_css_class("linked")
                 evidence_frame.append(toggle_row)
+
+                # Expand/collapse button stays first so it cannot be pushed out
+                # of the narrow operator pane by long evidence summaries.
+                expand_btn = Gtk.Button(label="🔍")
+                expand_btn.add_css_class("flat")
+                expand_btn.add_css_class("caption")
+                expand_btn.set_size_request(40, -1)
+                expand_btn.set_tooltip_text("Expand Context Inspector details")
+                toggle_row.append(expand_btn)
                 
                 # Compact summary chips (always visible)
                 summary = []
                 if message.context_hash:
                     summary.append(f"🔐 {message.context_hash[:6]}")
+                if message.context_kernel_hash:
+                    summary.append(f"🧬 {message.context_kernel_hash[:6]}")
                 if message.orico_counts:
                     summary.append(f"📦 ORICO {message.orico_counts.get('safeProvisional', 0)}")
                 if message.token_budget and message.token_budget.get('estimatedPromptTokens'):
@@ -691,19 +734,16 @@ class ChatMessage_Widget(Gtk.Box):
                 summary_label.add_css_class("dim-label")
                 summary_label.set_xalign(0)
                 summary_label.set_hexpand(True)
+                summary_label.set_ellipsize(Pango.EllipsizeMode.END)
                 toggle_row.append(summary_label)
-                
-                # Expand/collapse button
-                expand_btn = Gtk.Button(label="🔍")
-                expand_btn.add_css_class("flat")
-                expand_btn.add_css_class("caption")
-                expand_btn.set_tooltip_text("Expand Context Inspector details")
-                toggle_row.append(expand_btn)
                 
                 # --- Expandable detail panel (Gtk.Revealer) ---
                 revealer = Gtk.Revealer()
                 revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
                 revealer.set_transition_duration(200)
+                revealer.set_reveal_child(True)
+                expand_btn.set_label("🔼")
+                expand_btn.set_tooltip_text("Collapse Context Inspector details")
                 evidence_frame.append(revealer)
                 
                 detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -713,7 +753,7 @@ class ChatMessage_Widget(Gtk.Box):
                 detail_box.set_margin_bottom(6)
                 revealer.set_child(detail_box)
                 
-                def _build_detail_row(label_text: str, value_text: str, icon: str = "", warning: bool = False):
+                def _build_detail_row(label_text: str, value_text: Any, icon: str = "", warning: bool = False):
                     row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
                     row.set_margin_start(4)
                     lbl = Gtk.Label(label=f"{icon} {label_text}" if icon else label_text)
@@ -722,7 +762,7 @@ class ChatMessage_Widget(Gtk.Box):
                     lbl.set_xalign(0)
                     lbl.set_size_request(120, -1)
                     row.append(lbl)
-                    val = Gtk.Label(label=value_text)
+                    val = Gtk.Label(label=_display_text(value_text))
                     val.add_css_class("caption")
                     val.set_xalign(0)
                     val.set_selectable(True)
@@ -734,22 +774,42 @@ class ChatMessage_Widget(Gtk.Box):
                 # Section: Context Identity
                 detail_box.append(_build_detail_row("Hash", message.context_hash or "—", "🔐"))
                 detail_box.append(_build_detail_row("Kernel", message.context_kernel_version or "—", "📦"))
-                
+                if message.context_kernel_hash:
+                    detail_box.append(_build_detail_row("Kernel Hash", message.context_kernel_hash, "🧬"))
+
+                if message.context_kernel:
+                    kernel_keys = ", ".join(sorted(message.context_kernel.keys())[:10]) or "—"
+                    detail_box.append(_build_detail_row("Packet Keys", kernel_keys, "🧾"))
+
                 # Section: Source Health
-                if message.source_health:
+                source_health = message.source_health or {}
+                if not source_health and message.context_kernel:
+                    source_health = message.context_kernel.get("sourceHealth", {}) or {}
+
+                if source_health:
                     sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
                     sep.set_margin_top(4)
                     sep.set_margin_bottom(4)
                     detail_box.append(sep)
                     
-                    qdrant = message.source_health.get('qdrant', {})
-                    graph = message.source_health.get('graph', {})
-                    bridge = message.source_health.get('bridge', {})
+                    qdrant = source_health.get('qdrant', {})
+                    graph = source_health.get('graph', {})
+                    bridge = source_health.get('bridge', {})
+                    sqlite = source_health.get('sqlite', {})
                     
                     if qdrant.get('pointsCount') is not None:
                         detail_box.append(_build_detail_row("Qdrant", f"{qdrant['pointsCount']} points", "🗄️"))
                     if graph.get('nodesCount') is not None:
                         detail_box.append(_build_detail_row("Graph", f"{graph['nodesCount']} nodes / {graph.get('edgesCount', '?')} edges", "🕸️"))
+                    if sqlite.get('status'):
+                        sqlite_bits = [str(sqlite.get('status'))]
+                        if sqlite.get('pendingCount') is not None:
+                            sqlite_bits.append(f"pending {sqlite.get('pendingCount')}")
+                        if sqlite.get('approvedCount') is not None:
+                            sqlite_bits.append(f"approved {sqlite.get('approvedCount')}")
+                        if sqlite.get('promotedCount') is not None:
+                            sqlite_bits.append(f"promoted {sqlite.get('promotedCount')}")
+                        detail_box.append(_build_detail_row("SQLite", " • ".join(sqlite_bits), "🧷"))
                     if bridge.get('status'):
                         detail_box.append(_build_detail_row("Bridge", bridge['status'], "🔗"))
                     if bridge.get('latency_ms'):
@@ -779,9 +839,15 @@ class ChatMessage_Widget(Gtk.Box):
                     max_tok = message.token_budget.get('maxPromptTokens', '?')
                     est_tok = message.token_budget.get('estimatedPromptTokens', '?')
                     turns = message.token_budget.get('recentTurnsInjected', '?')
+                    receipt_refs = message.token_budget.get('receiptRefs', [])
+                    retrieval_refs = message.token_budget.get('retrievalRefs', [])
                     detail_box.append(_build_detail_row("Max", str(max_tok), "📊"))
                     detail_box.append(_build_detail_row("Estimated", str(est_tok), "📝"))
                     detail_box.append(_build_detail_row("Turns", str(turns), "🔄"))
+                    if retrieval_refs:
+                        detail_box.append(_build_detail_row("Retrieval", f"{len(retrieval_refs)} refs", "🔎"))
+                    if receipt_refs:
+                        detail_box.append(_build_detail_row("Receipts", f"{len(receipt_refs)} refs", "🧾"))
                 
                 # Section: Memory Refs
                 if message.memory_refs:
@@ -797,6 +863,7 @@ class ChatMessage_Widget(Gtk.Box):
                     detail_box.append(refs_lbl)
                     
                     for i, ref in enumerate(message.memory_refs[:8], 1):
+                        ref_label = _display_text(ref)
                         ref_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
                         ref_row.set_margin_start(16)
                         num = Gtk.Label(label=f"{i}.")
@@ -804,7 +871,7 @@ class ChatMessage_Widget(Gtk.Box):
                         num.add_css_class("dim-label")
                         num.set_size_request(20, -1)
                         ref_row.append(num)
-                        ref_txt = Gtk.Label(label=ref[:80] + ("…" if len(ref) > 80 else ""))
+                        ref_txt = Gtk.Label(label=ref_label[:80] + ("…" if len(ref_label) > 80 else ""))
                         ref_txt.add_css_class("caption")
                         ref_txt.set_xalign(0)
                         ref_txt.set_selectable(True)
@@ -845,6 +912,12 @@ class ChatMessage_Widget(Gtk.Box):
                     btn.set_tooltip_text("Collapse details" if active else "Expand Context Inspector details")
                 
                 expand_btn.connect("clicked", _on_evidence_toggle, revealer)
+                row_click = Gtk.GestureClick()
+                row_click.connect(
+                    "released",
+                    lambda gesture, n_press, x, y: _on_evidence_toggle(expand_btn, revealer),
+                )
+                toggle_row.add_controller(row_click)
 
 
 class TalkColumn(Gtk.Box):
@@ -1230,24 +1303,37 @@ class TalkColumn(Gtk.Box):
         voice_btn.connect("clicked", self._on_voice_click)
         input_row.append(voice_btn)
         
+        # Keep Send visible even when the right operator pane is narrow.
+        self._send_action_btn = Gtk.Button(label="Send")
+        self._send_action_btn.add_css_class("suggested-action")
+        self._send_action_btn.set_size_request(64, -1)
+        self._send_action_btn.connect("clicked", self._on_send)
+        input_row.append(self._send_action_btn)
+
         # Text entry
         self.entry = Gtk.Entry()
         self.entry.set_hexpand(True)
         self.entry.set_placeholder_text("Talk to Roxy...")
         self.entry.connect("activate", self._on_send)
-        
+
         # Phase 7: Keyboard shortcuts — Ctrl+Enter to send, Escape to clear
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", self._on_entry_key_pressed)
         self.entry.add_controller(key_controller)
-        
+
         input_row.append(self.entry)
-        
-        # Send button
-        send_btn = Gtk.Button(label="Send")
-        send_btn.add_css_class("suggested-action")
-        send_btn.connect("clicked", self._on_send)
-        input_row.append(send_btn)
+
+        # Make the chat surface immediately usable without hunting for the entry.
+        GLib.idle_add(self._focus_chat_entry)
+
+    def _focus_chat_entry(self):
+        """Move keyboard focus into the Roxy input field."""
+        try:
+            if hasattr(self, "entry") and self.entry:
+                self.entry.grab_focus()
+        except Exception as exc:
+            print(f"[Talk] Could not focus chat entry: {exc}")
+        return False
     
     def _connect_to_roxy(self):
         """Connect to local Ollama via ChatService."""
@@ -1458,6 +1544,8 @@ class TalkColumn(Gtk.Box):
             proposed_actions=getattr(message, 'proposed_actions', []),
             context_hash=getattr(message, 'context_hash', ''),
             context_kernel_version=getattr(message, 'context_kernel_version', ''),
+            context_kernel_hash=getattr(message, 'context_kernel_hash', ''),
+            context_kernel=getattr(message, 'context_kernel', {}),
             source_health=getattr(message, 'source_health', {}),
             token_budget=getattr(message, 'token_budget', {}),
             orico_counts=getattr(message, 'orico_counts', {}),
@@ -1609,10 +1697,10 @@ class TalkColumn(Gtk.Box):
             if response == Gtk.ResponseType.YES:
                 if self._chat_service.clear_session():
                     # Clear UI
-                    child = self.messages_box.get_first_child()
+                    child = self.chat_box.get_first_child()
                     while child:
                         next_child = child.get_next_sibling()
-                        self.messages_box.remove(child)
+                        self.chat_box.remove(child)
                         child = next_child
                     self._append_system_message("🗑️ Conversation cleared. Session reset.")
                     self._save_status_label.set_label("🗑️ Cleared")
@@ -1670,8 +1758,8 @@ class TalkColumn(Gtk.Box):
         from gi.repository import Gdk
         ctrl = (state & Gdk.ModifierType.CONTROL_MASK) != 0
         
-        if keyval == Gdk.KEY_Return and ctrl:
-            # Ctrl+Enter sends message
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            # Enter sends from the operator prompt; Ctrl+Enter remains supported.
             self._on_send(self.entry)
             return True
         elif keyval == Gdk.KEY_Escape:
