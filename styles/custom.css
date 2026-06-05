@@ -937,3 +937,19 @@ window.compact-mode .overview-card {
 }
 
 /* card-grid spacing handled in widget code */
+
+/* === V5 Agent Operating Console — Health Bar === */
+.health-good {
+    background-color: @moc_green;
+    border-radius: 4px;
+}
+
+.health-warn {
+    background-color: @moc_amber;
+    border-radius: 4px;
+}
+
+.health-bad {
+    background-color: @moc_red;
+    border-radius: 4px;
+}
