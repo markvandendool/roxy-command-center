@@ -229,6 +229,14 @@ class ChatService:
         self._last_error_message: Optional[str] = None
         self._proxy_base_url: str = ROXY_CHAT_PROXY_URL
 
+        # Phase 6: Service hardening — circuit breaker + exponential backoff
+        self._consecutive_failures: int = 0
+        self._circuit_open: bool = False
+        self._circuit_cooldown_until: Optional[datetime] = None
+        self._CIRCUIT_THRESHOLD: int = 5  # Open circuit after 5 consecutive failures
+        self._CIRCUIT_COOLDOWN_SECONDS: int = 30  # Stay open for 30s
+        self._MAX_BACKOFF_SECONDS: int = 16  # Max health check backoff
+
         # Callbacks
         self._on_message: Optional[Callable[[ChatMessage], None]] = None
         self._on_status_change: Optional[Callable[[ConnectionStatus, str], None]] = None
@@ -469,6 +477,18 @@ class ChatService:
 
     def _ping_harness(self, retry_count: int = 0):
         """Test connection to roxy-chat-proxy via /health endpoint."""
+        # Phase 6: Circuit breaker check
+        if self._circuit_open:
+            if self._circuit_cooldown_until and datetime.now() < self._circuit_cooldown_until:
+                remaining = int((self._circuit_cooldown_until - datetime.now()).total_seconds())
+                self._set_status(ConnectionStatus.ERROR, f"Circuit open — retry in {remaining}s")
+                return
+            else:
+                # Half-open: try one request
+                self._circuit_open = False
+                self._consecutive_failures = 0
+                print("[ChatService] Circuit half-open, attempting recovery...")
+
         uri = f"{self._proxy_base_url}/health"
         message = Soup.Message.new("GET", uri)
 
@@ -510,6 +530,13 @@ class ChatService:
                             f"• skills={skill_count} • store={storage_status}"
                         )
 
+                        # Phase 6: Reset circuit breaker on success
+                        if self._consecutive_failures > 0:
+                            print(f"[ChatService] Circuit reset after {self._consecutive_failures} failures")
+                            self._consecutive_failures = 0
+                            self._circuit_open = False
+                            self._circuit_cooldown_until = None
+
                         if status_state != ConnectionStatus.ERROR:
                             self._last_error_message = None
                         self._set_status(status_state, status_message)
@@ -534,10 +561,19 @@ class ChatService:
             error_str = str(e)
             is_timeout = "timed out" in error_str.lower() or "timeout" in error_str.lower()
 
-            if is_timeout and retry_count < 2:
-                print(f"[ChatService] Ping timeout, retry {retry_count + 1}/2...")
-                GLib.timeout_add_seconds(1, lambda: self._ping_harness(retry_count + 1) or False)
+            # Phase 6: Exponential backoff for retries
+            if is_timeout and retry_count < 3:
+                backoff = min(2 ** retry_count, self._MAX_BACKOFF_SECONDS)
+                print(f"[ChatService] Ping timeout, retry {retry_count + 1}/3 in {backoff}s...")
+                GLib.timeout_add_seconds(backoff, lambda: self._ping_harness(retry_count + 1) or False)
                 return
+
+            # Phase 6: Circuit breaker — count consecutive failures
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._CIRCUIT_THRESHOLD:
+                self._circuit_open = True
+                self._circuit_cooldown_until = datetime.now() + __import__('datetime').timedelta(seconds=self._CIRCUIT_COOLDOWN_SECONDS)
+                print(f"[ChatService] Circuit OPEN after {self._consecutive_failures} failures. Cooldown {self._CIRCUIT_COOLDOWN_SECONDS}s.")
 
             print(f"[ChatService] Ping failed: {e}")
             self._set_status(ConnectionStatus.ERROR, f"Harness unreachable: {e}")
@@ -919,6 +955,17 @@ class ChatService:
         if error == self._last_error_message:
             return
         self._last_error_message = error
+        
+        # Phase 6: Auto-reconnect on connection errors
+        error_lower = error.lower()
+        is_connection_error = any(k in error_lower for k in [
+            "unreachable", "connection", "refused", "reset", "timeout",
+            "cannot connect", "failed to connect", "no route"
+        ])
+        if is_connection_error:
+            print(f"[ChatService] Connection error detected, triggering health check...")
+            GLib.timeout_add_seconds(2, lambda: self._ping_harness() or False)
+        
         if self._on_message:
             error_msg = ChatMessage(
                 id=str(uuid.uuid4()),
