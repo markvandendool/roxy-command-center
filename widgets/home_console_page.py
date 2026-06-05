@@ -659,60 +659,192 @@ class ChatMessage_Widget(Gtk.Box):
                     btn.set_tooltip_text(f"Proposed action: {action}")
                     actions_box.append(btn)
             
-            # Context Inspector evidence row (assistant only)
+            # Context Inspector evidence row (assistant only) — Phase 2: Expandable details
             if not is_user and (message.context_hash or message.orico_counts or message.token_budget or message.source_health):
-                evidence_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-                evidence_box.set_margin_top(6)
-                evidence_box.set_margin_start(4)
-                evidence_box.set_margin_end(4)
-                evidence_box.set_margin_bottom(4)
-                evidence_box.add_css_class("linked")
-                bubble.append(evidence_box)
+                evidence_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+                evidence_frame.set_margin_top(6)
+                evidence_frame.set_margin_start(4)
+                evidence_frame.set_margin_end(4)
+                evidence_frame.set_margin_bottom(4)
+                bubble.append(evidence_frame)
                 
-                # Build tooltip with full evidence
-                tooltip_lines = ["=== Context Inspector ==="]
+                # --- Toggle header row ---
+                toggle_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                toggle_row.add_css_class("linked")
+                evidence_frame.append(toggle_row)
+                
+                # Compact summary chips (always visible)
+                summary = []
                 if message.context_hash:
-                    tooltip_lines.append(f"Context hash: {message.context_hash}")
-                if message.context_kernel_version:
-                    tooltip_lines.append(f"Kernel version: {message.context_kernel_version}")
+                    summary.append(f"🔐 {message.context_hash[:6]}")
                 if message.orico_counts:
-                    tooltip_lines.append(f"ORICO: safe={message.orico_counts.get('safeProvisional', '?')} review={message.orico_counts.get('ownerReview', '?')} privacy={message.orico_counts.get('privacyQuarantine', '?')}")
-                if message.token_budget:
-                    tooltip_lines.append(f"Tokens: max={message.token_budget.get('maxPromptTokens', '?')} est={message.token_budget.get('estimatedPromptTokens', '?')} turns={message.token_budget.get('recentTurnsInjected', '?')}")
+                    summary.append(f"📦 ORICO {message.orico_counts.get('safeProvisional', 0)}")
+                if message.token_budget and message.token_budget.get('estimatedPromptTokens'):
+                    summary.append(f"📝 {message.token_budget['estimatedPromptTokens']}tk")
+                if message.degraded_reasons:
+                    summary.append(f"⚠️ {len(message.degraded_reasons)} degraded")
+                elif message.harness_bypassed:
+                    summary.append("⚠️ BYPASS")
+                
+                summary_label = Gtk.Label(label="  ".join(summary) if summary else "📊 Evidence")
+                summary_label.add_css_class("caption")
+                summary_label.add_css_class("dim-label")
+                summary_label.set_xalign(0)
+                summary_label.set_hexpand(True)
+                toggle_row.append(summary_label)
+                
+                # Expand/collapse button
+                expand_btn = Gtk.Button(label="🔍")
+                expand_btn.add_css_class("flat")
+                expand_btn.add_css_class("caption")
+                expand_btn.set_tooltip_text("Expand Context Inspector details")
+                toggle_row.append(expand_btn)
+                
+                # --- Expandable detail panel (Gtk.Revealer) ---
+                revealer = Gtk.Revealer()
+                revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+                revealer.set_transition_duration(200)
+                evidence_frame.append(revealer)
+                
+                detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+                detail_box.set_margin_top(6)
+                detail_box.set_margin_start(8)
+                detail_box.set_margin_end(8)
+                detail_box.set_margin_bottom(6)
+                revealer.set_child(detail_box)
+                
+                def _build_detail_row(label_text: str, value_text: str, icon: str = "", warning: bool = False):
+                    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                    row.set_margin_start(4)
+                    lbl = Gtk.Label(label=f"{icon} {label_text}" if icon else label_text)
+                    lbl.add_css_class("caption")
+                    lbl.add_css_class("dim-label")
+                    lbl.set_xalign(0)
+                    lbl.set_size_request(120, -1)
+                    row.append(lbl)
+                    val = Gtk.Label(label=value_text)
+                    val.add_css_class("caption")
+                    val.set_xalign(0)
+                    val.set_selectable(True)
+                    if warning:
+                        val.add_css_class("warning")
+                    row.append(val)
+                    return row
+                
+                # Section: Context Identity
+                detail_box.append(_build_detail_row("Hash", message.context_hash or "—", "🔐"))
+                detail_box.append(_build_detail_row("Kernel", message.context_kernel_version or "—", "📦"))
+                
+                # Section: Source Health
                 if message.source_health:
+                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                    sep.set_margin_top(4)
+                    sep.set_margin_bottom(4)
+                    detail_box.append(sep)
+                    
                     qdrant = message.source_health.get('qdrant', {})
                     graph = message.source_health.get('graph', {})
-                    if qdrant.get('pointsCount'):
-                        tooltip_lines.append(f"Qdrant: {qdrant['pointsCount']} points")
-                    if graph.get('nodesCount'):
-                        tooltip_lines.append(f"Graph: {graph['nodesCount']} nodes / {graph.get('edgesCount', '?')} edges")
-                if message.degraded_reasons:
-                    tooltip_lines.append(f"Degraded: {', '.join(message.degraded_reasons)}")
+                    bridge = message.source_health.get('bridge', {})
+                    
+                    if qdrant.get('pointsCount') is not None:
+                        detail_box.append(_build_detail_row("Qdrant", f"{qdrant['pointsCount']} points", "🗄️"))
+                    if graph.get('nodesCount') is not None:
+                        detail_box.append(_build_detail_row("Graph", f"{graph['nodesCount']} nodes / {graph.get('edgesCount', '?')} edges", "🕸️"))
+                    if bridge.get('status'):
+                        detail_box.append(_build_detail_row("Bridge", bridge['status'], "🔗"))
+                    if bridge.get('latency_ms'):
+                        detail_box.append(_build_detail_row("Latency", f"{bridge['latency_ms']}ms", "⏱️"))
                 
-                # Compact evidence chips row
-                chips_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-                evidence_box.append(chips_row)
-                
-                if message.context_hash:
-                    hchip = Gtk.Label(label=f"🔐 {message.context_hash[:6]}")
-                    hchip.add_css_class("caption")
-                    hchip.add_css_class("dim-label")
-                    chips_row.append(hchip)
-                
+                # Section: ORICO
                 if message.orico_counts:
-                    ochip = Gtk.Label(label=f"📦 ORICO {message.orico_counts.get('safeProvisional', 0)}")
-                    ochip.add_css_class("caption")
-                    ochip.add_css_class("dim-label")
-                    chips_row.append(ochip)
+                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                    sep.set_margin_top(4)
+                    sep.set_margin_bottom(4)
+                    detail_box.append(sep)
+                    
+                    safe = message.orico_counts.get('safeProvisional', 0)
+                    review = message.orico_counts.get('ownerReview', 0)
+                    privacy = message.orico_counts.get('privacyQuarantine', 0)
+                    detail_box.append(_build_detail_row("Safe", str(safe), "🟢"))
+                    detail_box.append(_build_detail_row("Review", str(review), "🟡"))
+                    detail_box.append(_build_detail_row("Privacy", str(privacy), "🔴"))
                 
-                if message.token_budget.get('estimatedPromptTokens'):
-                    tchip = Gtk.Label(label=f"📝 {message.token_budget['estimatedPromptTokens']}tk")
-                    tchip.add_css_class("caption")
-                    tchip.add_css_class("dim-label")
-                    chips_row.append(tchip)
+                # Section: Token Budget
+                if message.token_budget:
+                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                    sep.set_margin_top(4)
+                    sep.set_margin_bottom(4)
+                    detail_box.append(sep)
+                    
+                    max_tok = message.token_budget.get('maxPromptTokens', '?')
+                    est_tok = message.token_budget.get('estimatedPromptTokens', '?')
+                    turns = message.token_budget.get('recentTurnsInjected', '?')
+                    detail_box.append(_build_detail_row("Max", str(max_tok), "📊"))
+                    detail_box.append(_build_detail_row("Estimated", str(est_tok), "📝"))
+                    detail_box.append(_build_detail_row("Turns", str(turns), "🔄"))
                 
-                # Tooltip on the whole evidence box
-                evidence_box.set_tooltip_text("\n".join(tooltip_lines))
+                # Section: Memory Refs
+                if message.memory_refs:
+                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                    sep.set_margin_top(4)
+                    sep.set_margin_bottom(4)
+                    detail_box.append(sep)
+                    
+                    refs_lbl = Gtk.Label(label=f"🧩 {len(message.memory_refs)} memory refs injected:")
+                    refs_lbl.add_css_class("caption")
+                    refs_lbl.add_css_class("dim-label")
+                    refs_lbl.set_xalign(0)
+                    detail_box.append(refs_lbl)
+                    
+                    for i, ref in enumerate(message.memory_refs[:8], 1):
+                        ref_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                        ref_row.set_margin_start(16)
+                        num = Gtk.Label(label=f"{i}.")
+                        num.add_css_class("caption")
+                        num.add_css_class("dim-label")
+                        num.set_size_request(20, -1)
+                        ref_row.append(num)
+                        ref_txt = Gtk.Label(label=ref[:80] + ("…" if len(ref) > 80 else ""))
+                        ref_txt.add_css_class("caption")
+                        ref_txt.set_xalign(0)
+                        ref_txt.set_selectable(True)
+                        ref_txt.set_wrap(True)
+                        ref_txt.set_max_width_chars(50)
+                        ref_row.append(ref_txt)
+                        detail_box.append(ref_row)
+                    
+                    if len(message.memory_refs) > 8:
+                        more = Gtk.Label(label=f"  … and {len(message.memory_refs) - 8} more")
+                        more.add_css_class("caption")
+                        more.add_css_class("dim-label")
+                        more.set_margin_start(16)
+                        detail_box.append(more)
+                
+                # Section: Degraded / Bypass
+                if message.degraded_reasons:
+                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                    sep.set_margin_top(4)
+                    sep.set_margin_bottom(4)
+                    detail_box.append(sep)
+                    
+                    for reason in message.degraded_reasons:
+                        detail_box.append(_build_detail_row("Warning", reason, "⚠️", warning=True))
+                
+                if message.harness_bypassed:
+                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                    sep.set_margin_top(4)
+                    sep.set_margin_bottom(4)
+                    detail_box.append(sep)
+                    detail_box.append(_build_detail_row("Status", "Harness bypassed — generic model response", "🚨", warning=True))
+                
+                # Toggle handler
+                def _on_evidence_toggle(btn, rev):
+                    active = not rev.get_reveal_child()
+                    rev.set_reveal_child(active)
+                    btn.set_label("🔼" if active else "🔍")
+                    btn.set_tooltip_text("Collapse details" if active else "Expand Context Inspector details")
+                
+                expand_btn.connect("clicked", _on_evidence_toggle, revealer)
 
 
 class TalkColumn(Gtk.Box):
