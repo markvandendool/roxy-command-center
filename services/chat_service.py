@@ -113,8 +113,33 @@ class ChatSession:
 # SESSION PERSISTENCE
 # =============================================================================
 
+# =============================================================================
+# SESSION PERSISTENCE — Phase 4: Save-authority UX
+# =============================================================================
+
+MAX_BACKUPS = 5
+
+
+def _rotate_backups():
+    """Rotate session backups, keeping MAX_BACKUPS most recent."""
+    try:
+        parent = SESSION_PATH.parent
+        backups = sorted(parent.glob("chat-session.json.*.bak"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in backups[MAX_BACKUPS:]:
+            old.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _atomic_write(path: Path, data: str):
+    """Atomic write: temp file + rename."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(data, encoding="utf-8")
+    tmp.replace(path)
+
+
 def _load_session_state() -> Dict[str, Any]:
-    """Load persisted session id from disk."""
+    """Load persisted session state from disk (session id + conversation history)."""
     try:
         if SESSION_PATH.exists():
             return json.loads(SESSION_PATH.read_text(encoding="utf-8"))
@@ -124,12 +149,39 @@ def _load_session_state() -> Dict[str, Any]:
 
 
 def _save_session_state(state: Dict[str, Any]) -> None:
-    """Save session id to disk."""
+    """Save session state to disk with atomic write and backup rotation."""
     try:
         SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SESSION_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        # Backup existing file before overwrite
+        if SESSION_PATH.exists():
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup = SESSION_PATH.with_suffix(f".json.{ts}.bak")
+            SESSION_PATH.rename(backup)
+            _rotate_backups()
+        _atomic_write(SESSION_PATH, json.dumps(state, indent=2, default=str))
     except Exception as e:
         print(f"[ChatService] Session save error: {e}")
+
+
+def _export_session_to_markdown(messages: List[ChatMessage], path: Path) -> bool:
+    """Export conversation history to markdown file."""
+    try:
+        lines = ["# Roxy Conversation Export\n"]
+        lines.append(f"**Exported:** {datetime.now().isoformat()}\n")
+        lines.append(f"**Messages:** {len(messages)}\n\n---\n\n")
+        for m in messages:
+            role = "🧑 User" if m.role == "user" else "🤖 Roxy"
+            lines.append(f"## {role} — {m.timestamp.isoformat()}\n")
+            lines.append(f"{m.content}\n")
+            if m.model:
+                lines.append(f"\n*Model: {m.model} | Latency: {m.latency_ms}ms | Hash: {m.context_hash}*")
+            lines.append("\n---\n")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(path, "\n".join(lines))
+        return True
+    except Exception as e:
+        print(f"[ChatService] Export error: {e}")
+        return False
 
 
 # =============================================================================
@@ -214,17 +266,23 @@ class ChatService:
         self._on_typing = on_typing
         self._on_meta_update = on_meta_update
 
-        # Restore roxy_session_id from disk if available
+        # Restore session from disk (roxy_session_id + conversation history)
         restored_session_id = self._persisted_state.get("roxy_session_id")
+        restored_messages = self.load_session_messages()
 
         self._session = ChatSession(
             id=str(uuid.uuid4()),
             identity=identity,
             mode=ChatMode.DRAFT,
-            messages=[],
+            messages=restored_messages,
             created_at=datetime.now(),
             roxy_session_id=restored_session_id,
         )
+        
+        # Replay restored messages to UI
+        if restored_messages and on_message:
+            for m in restored_messages:
+                on_message(m)
 
         # Test connection to harness
         self._set_status(ConnectionStatus.CONNECTING, "Connecting to ROXY harness...")
@@ -234,6 +292,102 @@ class ChatService:
         """Disconnect from ROXY harness."""
         self._session = None
         self._set_status(ConnectionStatus.DISCONNECTED, "Disconnected")
+
+    # -------------------------------------------------------------------------
+    # Session persistence (Phase 4: Save-authority UX)
+    # -------------------------------------------------------------------------
+
+    def save_session(self) -> bool:
+        """Persist full conversation history to disk."""
+        if not self._session:
+            return False
+        try:
+            state = {
+                "roxy_session_id": self._session.roxy_session_id,
+                "identity": self._session.identity.value,
+                "mode": self._session.mode.value,
+                "created_at": self._session.created_at.isoformat(),
+                "messages": [
+                    {
+                        "id": m.id,
+                        "role": m.role,
+                        "content": m.content,
+                        "timestamp": m.timestamp.isoformat(),
+                        "identity": m.identity.value,
+                        "latency_ms": m.latency_ms,
+                        "model": m.model,
+                        "memory_refs": m.memory_refs,
+                        "proposed_actions": m.proposed_actions,
+                        "context_hash": m.context_hash,
+                        "context_kernel_version": m.context_kernel_version,
+                        "source_health": m.source_health,
+                        "token_budget": m.token_budget,
+                        "orico_counts": m.orico_counts,
+                        "degraded_reasons": m.degraded_reasons,
+                        "harness_bypassed": m.harness_bypassed,
+                    }
+                    for m in self._session.messages
+                ],
+            }
+            _save_session_state(state)
+            return True
+        except Exception as e:
+            print(f"[ChatService] save_session error: {e}")
+            return False
+
+    def load_session_messages(self) -> List[ChatMessage]:
+        """Restore conversation messages from disk."""
+        try:
+            state = _load_session_state()
+            msgs = state.get("messages", [])
+            return [
+                ChatMessage(
+                    id=m.get("id", str(uuid.uuid4())),
+                    role=m["role"],
+                    content=m["content"],
+                    timestamp=datetime.fromisoformat(m["timestamp"]),
+                    identity=Identity(m.get("identity", "mindsong")),
+                    latency_ms=m.get("latency_ms", 0),
+                    model=m.get("model", ""),
+                    memory_refs=m.get("memory_refs", []),
+                    proposed_actions=m.get("proposed_actions", []),
+                    context_hash=m.get("context_hash", ""),
+                    context_kernel_version=m.get("context_kernel_version", ""),
+                    source_health=m.get("source_health", {}),
+                    token_budget=m.get("token_budget", {}),
+                    orico_counts=m.get("orico_counts", {}),
+                    degraded_reasons=m.get("degraded_reasons", []),
+                    harness_bypassed=m.get("harness_bypassed", False),
+                )
+                for m in msgs
+            ]
+        except Exception as e:
+            print(f"[ChatService] load_session_messages error: {e}")
+            return []
+
+    def clear_session(self) -> bool:
+        """Clear conversation history and reset session."""
+        if not self._session:
+            return False
+        self._session.messages.clear()
+        self._session.roxy_session_id = None
+        try:
+            _save_session_state({})
+            return True
+        except Exception as e:
+            print(f"[ChatService] clear_session error: {e}")
+            return False
+
+    def export_to_markdown(self, path: Optional[Path] = None) -> Optional[Path]:
+        """Export conversation to markdown file."""
+        if not self._session or not self._session.messages:
+            return None
+        if path is None:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = Path.home() / ".config" / "roxy-command-center" / "exports" / f"conversation-{ts}.md"
+        if _export_session_to_markdown(self._session.messages, path):
+            return path
+        return None
 
     def send_message(self, text: str, routing_mode: str = "", pool: str = "") -> Optional[ChatMessage]:
         """
@@ -750,6 +904,9 @@ class ChatService:
 
         if self._on_message:
             self._on_message(assistant_msg)
+        
+        # Phase 4: Auto-save after every assistant response
+        self.save_session()
 
     def _handle_error(self, error: str):
         """Handle error response."""

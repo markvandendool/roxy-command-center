@@ -1184,6 +1184,39 @@ class TalkColumn(Gtk.Box):
         self._last_meta_chip.set_tooltip_text("Last request execution details")
         operator_box.append(self._last_meta_chip)
         
+        # Phase 4: Save-authority toolbar
+        save_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        save_toolbar.set_margin_top(4)
+        input_area.append(save_toolbar)
+        
+        save_btn = Gtk.Button(label="💾 Save")
+        save_btn.add_css_class("flat")
+        save_btn.add_css_class("caption")
+        save_btn.set_tooltip_text("Save conversation to session file")
+        save_btn.connect("clicked", self._on_save_session)
+        save_toolbar.append(save_btn)
+        
+        export_btn = Gtk.Button(label="📤 Export")
+        export_btn.add_css_class("flat")
+        export_btn.add_css_class("caption")
+        export_btn.set_tooltip_text("Export conversation to markdown file")
+        export_btn.connect("clicked", self._on_export_session)
+        save_toolbar.append(export_btn)
+        
+        clear_btn = Gtk.Button(label="🗑️ Clear")
+        clear_btn.add_css_class("flat")
+        clear_btn.add_css_class("caption")
+        clear_btn.add_css_class("destructive-action")
+        clear_btn.set_tooltip_text("Clear conversation history (requires confirmation)")
+        clear_btn.connect("clicked", self._on_clear_session)
+        save_toolbar.append(clear_btn)
+        
+        self._save_status_label = Gtk.Label(label="")
+        self._save_status_label.add_css_class("caption")
+        self._save_status_label.add_css_class("dim-label")
+        self._save_status_label.set_margin_start(8)
+        save_toolbar.append(self._save_status_label)
+        
         # Input row
         input_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         input_area.append(input_row)
@@ -1523,6 +1556,53 @@ class TalkColumn(Gtk.Box):
         """Voice button - push-to-talk (Phase 2 stub)."""
         print("[Talk] Voice input not yet implemented (Phase 2)")
         # In Phase 2: self._voice_service.start_recording()
+    
+    def _on_save_session(self, button):
+        """Manually trigger session save."""
+        if self._chat_service.save_session():
+            self._save_status_label.set_label("💾 Saved")
+        else:
+            self._save_status_label.set_label("❌ Save failed")
+        GLib.timeout_add_seconds(3, lambda: self._save_status_label.set_label("") or False)
+    
+    def _on_export_session(self, button):
+        """Export conversation to markdown."""
+        path = self._chat_service.export_to_markdown()
+        if path:
+            self._save_status_label.set_label(f"📤 {path.name}")
+        else:
+            self._save_status_label.set_label("❌ Export failed")
+        GLib.timeout_add_seconds(5, lambda: self._save_status_label.set_label("") or False)
+    
+    def _on_clear_session(self, button):
+        """Clear conversation with confirmation dialog."""
+        dialog = Gtk.MessageDialog(
+            transient_for=self.get_root(),
+            modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text="Clear conversation history?",
+        )
+        dialog.set_secondary_text("This will erase all messages and reset the session. This action cannot be undone.")
+        
+        def on_response(dialog, response):
+            if response == Gtk.ResponseType.YES:
+                if self._chat_service.clear_session():
+                    # Clear UI
+                    child = self.messages_box.get_first_child()
+                    while child:
+                        next_child = child.get_next_sibling()
+                        self.messages_box.remove(child)
+                        child = next_child
+                    self._append_system_message("🗑️ Conversation cleared. Session reset.")
+                    self._save_status_label.set_label("🗑️ Cleared")
+                else:
+                    self._save_status_label.set_label("❌ Clear failed")
+                GLib.timeout_add_seconds(3, lambda: self._save_status_label.set_label("") or False)
+            dialog.destroy()
+        
+        dialog.connect("response", on_response)
+        dialog.show()
     
     def _detect_natural_language_intent(self, text: str) -> str:
         """Detect routing intent from natural language. Returns CHAT/RAG/EXEC/""."""
