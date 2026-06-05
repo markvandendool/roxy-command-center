@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.agent_discovery_service import AgentDiscoveryService
 from services.gpu_monitor import get_gpu_monitor
 from services.roxy_status_provider import gpu_status as roxy_gpu_status
+from services.mission_truth_provider import MissionTruthProvider
 
 
 # =============================================================================
@@ -73,81 +74,8 @@ class ApexLane:
 
 
 # =============================================================================
-# MOCK DATA (until real mission API exists)
+# MOCK DATA REMOVED — replaced by MissionTruthProvider (canonical SSOT data)
 # =============================================================================
-
-class MissionDataStore:
-    """Placeholder mission data."""
-
-    @classmethod
-    def get_missions(cls) -> List[Mission]:
-        return [
-            Mission(
-                id="m1", name="Theater Runtime Stability",
-                status=MissionStatus.HEALTHY, health_score=92, confidence=88,
-                owner="claude", squad=["claude", "kimi"],
-                blockers=[], receipts=4,
-                timeline="2d remaining", priority=0,
-                tags=["runtime", "webgpu"]
-            ),
-            Mission(
-                id="m2", name="Brain Quality Guard",
-                status=MissionStatus.WARNING, health_score=67, confidence=72,
-                owner="roxy", squad=["roxy-judge"],
-                blockers=["Judge 235B fetch timeout"], receipts=2,
-                timeline="ongoing", priority=0,
-                tags=["brain", "judge"]
-            ),
-            Mission(
-                id="m3", name="Kimi Long Runner Integration",
-                status=MissionStatus.HEALTHY, health_score=85, confidence=90,
-                owner="codex", squad=["codex", "kimi"],
-                blockers=[], receipts=3,
-                timeline="1d remaining", priority=1,
-                tags=["infrastructure", "kimi"]
-            ),
-            Mission(
-                id="m4", name="Agent Reputation Convergence",
-                status=MissionStatus.STALLED, health_score=45, confidence=40,
-                owner="unassigned", squad=[],
-                blockers=["No canonical reputation API"], receipts=1,
-                timeline="stalled 3d", priority=1,
-                tags=["agents", "reputation"]
-            ),
-            Mission(
-                id="m5", name="GPU Canon — Ada Affinity",
-                status=MissionStatus.HEALTHY, health_score=95, confidence=95,
-                owner="roxy", squad=["roxy-apex"],
-                blockers=[], receipts=6,
-                timeline="stable", priority=2,
-                tags=["apex", "gpu"]
-            ),
-            Mission(
-                id="m6", name="UI Authority Violation Cleanup",
-                status=MissionStatus.HEALTHY, health_score=100, confidence=100,
-                owner="kimi", squad=["kimi"],
-                blockers=[], receipts=2,
-                timeline="completed", priority=2,
-                tags=["governance", "ui"]
-            ),
-        ]
-
-    @classmethod
-    def get_apex_lanes(cls) -> List[ApexLane]:
-        return [
-            ApexLane("ada-coder-frontier", 8085, "Qwen3.6-27B Q4_K_M MTP",
-                     "healthy", 36.2, 17913, 20475, "cuda"),
-            ApexLane("llama-cpp-cpu", 8084, "Qwen3-235B Q3_K_L",
-                     "healthy", 3.5, 0, 0, "cpu"),
-            ApexLane("llama-cpp-vulkan-6900xt", 8083, "Qwen2.5-7B Q4_K_M",
-                     "healthy", 84.0, 2150, 16384, "vulkan"),
-            ApexLane("llama-cpp-vulkan-w5700x", 8082, "Qwen2.5-7B Q4_K_M",
-                     "healthy", 83.0, 4367, 16368, "vulkan"),
-            ApexLane("ollama", 11434, "qwen2.5-coder:14b",
-                     "healthy", None, 0, 0, "ollama"),
-            ApexLane("litellm-gateway", 4000, "10 models",
-                     "healthy", None, 0, 0, "gateway"),
-        ]
 
 
 # =============================================================================
@@ -232,6 +160,30 @@ class MissionCard(Gtk.Box):
                 s.add_css_class("moc-chip")
                 s.add_css_class("moc-chip-info")
                 squad_box.append(s)
+
+        # Truth grade + data source footer
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        footer.set_margin_top(4)
+        self.append(footer)
+
+        grade_colors = {
+            "live_probe": ("moc-chip-success", "🔴 live"),
+            "receipt_derived": ("moc-chip-warning", "📜 receipt"),
+            "governed_packet": ("moc-chip-info", "📋 governed"),
+            "stale_log": ("moc-chip-danger", "⚪ stale"),
+            "retired": ("moc-chip-danger", "🪦 retired"),
+        }
+        grade_cls, grade_label = grade_colors.get(self.mission.truth_grade, ("moc-chip-warning", f"❓ {self.mission.truth_grade}"))
+        grade_chip = Gtk.Label(label=grade_label)
+        grade_chip.add_css_class("moc-chip")
+        grade_chip.add_css_class(grade_cls)
+        grade_chip.set_tooltip_text(f"Truth grade: {self.mission.truth_grade}")
+        footer.append(grade_chip)
+
+        src_lbl = Gtk.Label(label=f"📡 {self.mission.data_source}")
+        src_lbl.add_css_class("moc-row-subtitle")
+        src_lbl.set_xalign(0)
+        footer.append(src_lbl)
 
     def _make_bar_row(self, label: str, value: int, color: str) -> Gtk.Box:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -435,10 +387,15 @@ class ApexRuntimePanel(Gtk.Box):
             self._lanes_box.remove(self._lanes_box.get_first_child())
         self._lane_rows.clear()
 
-        lanes = MissionDataStore.get_apex_lanes()
-        all_healthy = all(l.status == "healthy" for l in lanes)
-        self._overall_label.set_label("GREEN" if all_healthy else "DEGRADED")
-        if all_healthy:
+        lanes = MissionTruthProvider.get_apex_lanes()
+        # Consider "healthy" only if live_probe or cloud_api
+        live_healthy = all(
+            l.status == "healthy" and l.truth_grade in ("live_probe", "cloud_api")
+            for l in lanes if l.status != "retired"
+        )
+        has_retired = any(l.status == "retired" for l in lanes)
+        self._overall_label.set_label("GREEN" if live_healthy else "DEGRADED")
+        if live_healthy:
             self._overall_label.remove_css_class("moc-chip-danger")
             self._overall_label.add_css_class("moc-chip-success")
         else:
@@ -478,8 +435,15 @@ class ApexRuntimePanel(Gtk.Box):
         row.set_margin_top(2)
         row.set_margin_bottom(2)
 
-        if lane.status == "healthy":
+        # Status styling based on truth grade, not just status string
+        if lane.truth_grade == "live_probe" and lane.status == "healthy":
             row.add_css_class("status-healthy")
+        elif lane.truth_grade == "cloud_api":
+            row.add_css_class("status-healthy")
+        elif lane.truth_grade == "retired":
+            row.add_css_class("status-warn")
+        elif lane.truth_grade == "stale_log":
+            row.add_css_class("status-warn")
         else:
             row.add_css_class("status-blocked")
 
@@ -499,6 +463,26 @@ class ApexRuntimePanel(Gtk.Box):
         name_box.append(model)
 
         row.append(name_box)
+
+        # Truth grade chip
+        grade_labels = {
+            "live_probe": "🔴 live",
+            "cloud_api": "☁️ cloud",
+            "stale_log": "⚪ stale",
+            "retired": "🪦 retired",
+        }
+        grade_text = grade_labels.get(lane.truth_grade, f"❓ {lane.truth_grade}")
+        grade_chip = Gtk.Label(label=grade_text)
+        grade_chip.add_css_class("moc-chip")
+        if lane.truth_grade == "live_probe":
+            grade_chip.add_css_class("moc-chip-success")
+        elif lane.truth_grade == "cloud_api":
+            grade_chip.add_css_class("moc-chip-info")
+        elif lane.truth_grade in ("stale_log", "retired"):
+            grade_chip.add_css_class("moc-chip-warning")
+        else:
+            grade_chip.add_css_class("moc-chip-danger")
+        row.append(grade_chip)
 
         # Port
         port = Gtk.Label(label=f":{lane.port}")
@@ -717,12 +701,24 @@ class MissionDashboardPage(Gtk.Box):
         self.append(self._cmd_bar)
 
     def _load_missions(self):
-        missions = MissionDataStore.get_missions()
+        missions = MissionTruthProvider.get_missions()
         self._mission_count.set_label(f"{len(missions)} missions")
 
         for mission in missions:
             card = MissionCard(mission)
             self._mission_flow.append(card)
+
+        # Schedule auto-refresh every 30s
+        GLib.timeout_add_seconds(30, self._auto_refresh)
+
+    def _auto_refresh(self):
+        """Reload missions and lanes from canonical sources."""
+        # Clear missions
+        while self._mission_flow.get_first_child():
+            self._mission_flow.remove(self._mission_flow.get_first_child())
+        self._load_missions()
+        self._apex_panel._refresh()
+        return True  # Continue polling
 
     def update(self, data: dict):
         """Update from daemon data."""

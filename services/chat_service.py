@@ -711,6 +711,20 @@ class ChatService:
         # Lane-aware model selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
         model = self._resolve_model(text)
 
+        # Judge is SLOW (3.5 t/s) — extend timeouts
+        is_judge = model == "roxy-cpu-supermodel"
+        if is_judge:
+            try:
+                self._soup_session.props.timeout = 180
+            except Exception:
+                pass
+            print("[ChatService] Judge lane selected — timeout extended to 180s")
+        else:
+            try:
+                self._soup_session.props.timeout = 120
+            except Exception:
+                pass
+
         # Build messages array from conversation history
         messages = self._build_messages()
         # If the last message isn't already in history (it should be), ensure it is
@@ -756,29 +770,34 @@ class ChatService:
             self._on_chat_response,
             None
         )
-        self._schedule_status_updates()
+        self._schedule_status_updates(is_judge=is_judge)
 
     def _cancel_status_timeouts(self):
         for handle in self._timeout_handles:
             GLib.source_remove(handle)
         self._timeout_handles.clear()
 
-    def _schedule_status_updates(self):
+    def _schedule_status_updates(self, is_judge: bool = False):
         self._cancel_status_timeouts()
+        timeout_sec = 180 if is_judge else 120
+        warming_msg = (
+            "Loading Judge model… (235B CPU, ~3.5 t/s — expect 60–180s)"
+            if is_judge else
+            "Loading model… (cold start can take 60–120s)"
+        )
         self._timeout_handles.append(
             GLib.timeout_add_seconds(5, self._status_callback(
-                ConnectionStatus.WARMING,
-                "Loading model… (cold start can take 60–120s)"
+                ConnectionStatus.WARMING, warming_msg
             ))
         )
         self._timeout_handles.append(
             GLib.timeout_add_seconds(30, self._status_callback(
                 ConnectionStatus.WARMING,
-                "Still loading…"
+                "Still loading… (Judge may take 2–3 min)" if is_judge else "Still loading…"
             ))
         )
         self._timeout_handles.append(
-            GLib.timeout_add_seconds(120, self._timeout_callback())
+            GLib.timeout_add_seconds(timeout_sec, self._timeout_callback())
         )
 
     def _status_callback(self, status: ConnectionStatus, message: str):

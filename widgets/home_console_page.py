@@ -1627,31 +1627,50 @@ class TalkColumn(Gtk.Box):
         # Add "Ask Judge" button for assistant messages (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
         if message.role == "assistant":
             health = self._chat_service.get_lane_health()
-            judge_healthy = health.get("judge", {}).get("healthy", False)
-            
+            judge_info = health.get("judge", {})
+            # Judge is usable if status is healthy (even if slow)
+            judge_alive = judge_info.get("status") == "healthy" or judge_info.get("truthGrade") == "live_probe"
+            judge_slow = judge_info.get("tps", 100) < 10  # Under 10 t/s = slow
+
+            # If this response came from Judge, label it
+            model_used = getattr(message, 'model', '') or ''
+            is_judge_response = 'judge' in model_used.lower() or 'cpu-supermodel' in model_used.lower()
+
             judge_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
             judge_box.set_margin_start(12)
             judge_box.set_margin_end(12)
             judge_box.set_margin_bottom(8)
             self.chat_box.append(judge_box)
-            
+
+            if is_judge_response:
+                judge_header = Gtk.Label(label="⚖️ Judge Review")
+                judge_header.add_css_class("caption")
+                judge_header.add_css_class("accent")
+                judge_box.append(judge_header)
+
             judge_btn = Gtk.Button(label="⚖️ Ask Judge")
             judge_btn.add_css_class("pill")
             judge_btn.add_css_class("caption")
-            if judge_healthy:
+            if judge_alive:
                 judge_btn.add_css_class("suggested-action")
-                judge_btn.set_tooltip_text("Send this response to Judge for adversarial review")
+                tooltip = "Send this response to Judge for adversarial review"
+                if judge_slow:
+                    tooltip += " (expect 1–3 min)"
+                judge_btn.set_tooltip_text(tooltip)
                 judge_btn.connect("clicked", self._on_ask_judge, message.content)
             else:
                 judge_btn.set_sensitive(False)
                 judge_btn.set_tooltip_text("Judge lane is not available")
             judge_box.append(judge_btn)
-            
+
             send_to_judge_btn = Gtk.Button(label="📤 Send plan to Judge")
             send_to_judge_btn.add_css_class("pill")
             send_to_judge_btn.add_css_class("caption")
-            if judge_healthy:
-                send_to_judge_btn.set_tooltip_text("Send current plan/response to Judge for deep review")
+            if judge_alive:
+                tooltip = "Send current plan/response to Judge for deep review"
+                if judge_slow:
+                    tooltip += " (expect 1–3 min)"
+                send_to_judge_btn.set_tooltip_text(tooltip)
                 send_to_judge_btn.connect("clicked", self._on_ask_judge, message.content)
             else:
                 send_to_judge_btn.set_sensitive(False)
@@ -1768,6 +1787,12 @@ class TalkColumn(Gtk.Box):
         print(f"[Talk] Lane: {lane} → {self._chat_service.selected_lane}")
         self._save_settings()
         self._update_lane_health_display()
+
+        # SLOW warning for Judge
+        if lane == "judge":
+            self._append_system_message(
+                "⚠️ Judge selected: Qwen3-235B on CPU (~3.5 t/s). Responses may take 1–3 minutes."
+            )
     
     def _update_lane_health_display(self):
         """Poll and display lane health from canonical apex-status.json."""
@@ -1779,16 +1804,25 @@ class TalkColumn(Gtk.Box):
                     chip.set_label(f"{chip.get_tooltip_text().split()[0]}: ❓")
                     continue
                 name = chip.get_tooltip_text().split()[0]
+                tps = info.get("tps")
+                is_slow = tps is not None and tps < 10
                 if info.get("healthy"):
-                    tps = info.get("tps")
-                    tps_str = f" {tps}t/s" if tps else ""
-                    chip.set_label(f"{name}: 🟢{tps_str}")
+                    if is_slow:
+                        chip.set_label(f"{name}: 🐢 {tps}t/s")
+                        chip.set_tooltip_text(f"{name} lane: alive but SLOW ({tps} t/s)")
+                    else:
+                        tps_str = f" {tps}t/s" if tps else ""
+                        chip.set_label(f"{name}: 🟢{tps_str}")
+                        chip.set_tooltip_text(f"{name} lane: healthy")
                 elif info.get("truthGrade") == "cloud_api":
                     chip.set_label(f"{name}: ☁️")
+                    chip.set_tooltip_text(f"{name} lane: cloud API")
                 elif info.get("truthGrade") in ("stale_log", "retired"):
                     chip.set_label(f"{name}: ⚪")
+                    chip.set_tooltip_text(f"{name} lane: {info.get('truthGrade')}")
                 else:
                     chip.set_label(f"{name}: 🔴")
+                    chip.set_tooltip_text(f"{name} lane: unhealthy")
         except Exception as exc:
             print(f"[Talk] Lane health update failed: {exc}")
     
