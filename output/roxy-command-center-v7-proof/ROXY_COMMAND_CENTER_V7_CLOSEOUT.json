@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "roxy-command-center-v7-closeout.v1",
+  "ticket": "ROXY-COMMAND-CENTER-V7-OPERATOR-ACTION-SPINE",
+  "closedAt": "2026-06-05T17:30:00Z",
+  "agent": "kimi-cli",
+  "commits": [
+    "368b87e ROXY-COMMAND-CENTER-V7-OPERATOR-ACTION-SPINE: Phases 1-7"
+  ],
+  "precedingCommits": [
+    "f1133f0 chore: remove pycache from git tracking",
+    "edbfd04 ROXY-CIVILIZATION-CLOSURE-V1: Mission action buttons + Judge review + Kimi assign",
+    "41b56de ROXY-CIVILIZATION-CLOSURE-V1: Phase 1 — Home Console mock eradication",
+    "b6a0a58 ROXY-CIVILIZATION-CLOSURE-V1: Phase 0 + Phase 3"
+  ],
+  "phases": {
+    "0": {
+      "name": "Baseline Verification",
+      "status": "PASS",
+      "notes": "8084 Judge OK, 8085 Frontier OK, 4001 Proxy OK, 4000 LiteLLM 10 models, long-runner ACTIVE"
+    },
+    "1": {
+      "name": "Judge Timeout Fix + Async Path",
+      "status": "PASS",
+      "files": [
+        "services/judge_service.py",
+        "widgets/mission_dashboard_page.py"
+      ],
+      "acceptance": [
+        "JudgeService creates background jobs",
+        "Jobs saved to runtime/judge/jobs/",
+        "Receipts saved to output/judge/receipts/",
+        "180s timeout for Judge API calls",
+        "GTK UI never blocks on 235B Judge"
+      ]
+    },
+    "2": {
+      "name": "Mission Action Receipts",
+      "status": "PASS",
+      "files": [
+        "services/action_receipt_service.py",
+        "widgets/mission_dashboard_page.py"
+      ],
+      "acceptance": [
+        "Every mission button click creates real receipt",
+        "Schema: roxy-command-center-action.v1",
+        "Receipts in output/roxy-command-center/actions/"
+      ]
+    },
+    "3": {
+      "name": "Kimi Assignment Path",
+      "status": "PASS",
+      "files": [
+        "services/kimi_assignment_service.py"
+      ],
+      "acceptance": [
+        "KimiAssignmentPacketV1 created per assignment",
+        "Discovers visible terminal or falls back to long-runner",
+        "Packets in output/roxy-command-center/kimi-assignments/"
+      ]
+    },
+    "4": {
+      "name": "Investigate Action",
+      "status": "PASS",
+      "files": [
+        "services/investigation_service.py"
+      ],
+      "acceptance": [
+        "Read-only investigation packets created",
+        "Safe mode: no mutations, bounded read paths",
+        "Packets in output/roxy-command-center/investigations/"
+      ]
+    },
+    "5": {
+      "name": "Orchestrator Panel Minimal",
+      "status": "PASS",
+      "files": [
+        "widgets/orchestrator_panel.py"
+      ],
+      "acceptance": [
+        "Shows pending Judge jobs",
+        "Shows pending action receipts",
+        "Shows Kimi assignments",
+        "Shows investigations",
+        "Shows recent outcomes",
+        "Auto-refresh every 10s"
+      ]
+    },
+    "6": {
+      "name": "Voice Foundry Status",
+      "status": "PASS",
+      "files": [
+        "services/voice_status_provider.py"
+      ],
+      "acceptance": [
+        "Probes Piper (10200), Whisper (10300), OpenWakeWord (10400)",
+        "Classification: READY/DORMANT/MISSING_SERVICE/BLOCKED",
+        "Current classification: BLOCKED (0/3 alive)"
+      ]
+    },
+    "7": {
+      "name": "Plan Docs Decision",
+      "status": "PASS",
+      "files": [
+        "docs/archive/FINAL-WIRING-PLAN.md",
+        "docs/archive/WIRING-AUDIT.md"
+      ],
+      "acceptance": [
+        "Superseded plan docs moved to docs/archive/",
+        "Proof doc ROXY_COMMAND_CENTER_LANE_SWITCHER_PROOF_V1.md retained"
+      ]
+    },
+    "8": {
+      "name": "GitNexus Watchdog",
+      "status": "PASS",
+      "files": [
+        "output/gitnexus/gitnexus-refresh-status.json (SSOT repo)"
+      ],
+      "acceptance": [
+        "GitNexus MCP server running (PID 528378)",
+        "Status receipt written",
+        "No foreground analyze run"
+      ]
+    }
+  },
+  "servicesCreated": [
+    "services/action_receipt_service.py",
+    "services/judge_service.py",
+    "services/kimi_assignment_service.py",
+    "services/investigation_service.py",
+    "services/voice_status_provider.py",
+    "services/orchestrator_truth_provider.py",
+    "services/mission_truth_provider.py"
+  ],
+  "widgetsCreated": [
+    "widgets/orchestrator_panel.py"
+  ],
+  "mockStoresDeleted": [
+    "MissionDataStore (widgets/mission_dashboard_page.py)",
+    "MockDataStore (widgets/home_console_page.py)"
+  ],
+  "dataSourcesConsumed": [
+    "public/roxy/civilization-health.json",
+    "public/roxy/authority-convergence.json",
+    "public/roxy/apex-status.json",
+    ".git/regent/campaigns/*.json",
+    "output/roxy/episodic-digest/latest.json"
+  ],
+  "remainingGaps": [
+    "Pixel Agent audit/wire decision (files substantial, deferred)",
+    "Voice Foundry implementation (status only, pipeline blocked)",
+    "Orchestrator panel nav integration (widget created, nav wiring pending)",
+    "Judge job completion callback to GTK UI (polling works, live update pending)"
+  ],
+  "hardRulesFollowed": {
+    "noNewDashboard": true,
+    "noNewOrchestratorSystem": true,
+    "noBypassAuthGate": true,
+    "noRawShell": true,
+    "noInferenceDisruption": true,
+    "noModelLoading": true,
+    "no8085_8084Restart": true,
+    "noPixelAgentReopen": true,
+    "noRuntimeArtifactDirtChase": true,
+    "noGitNexusForeground": true,
+    "noVoiceFoundryBuild": true
+  },
+  "verification": {
+    "syntaxChecks": "PASS (all Python files compile)",
+    "serviceIntegration": "PASS (receipts, jobs, packets created successfully)",
+    "voiceStatus": "BLOCKED (0/3 services alive — correct)",
+    "judgeTimeout": "180s configured",
+    "actionReceipts": "Every button creates real receipt"
+  }
+}
