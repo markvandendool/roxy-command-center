@@ -35,6 +35,7 @@ from services.chat_service import (
     Identity as ServiceIdentity,
     get_chat_service, get_voice_service
 )
+from services.orchestrator_truth_provider import OrchestratorTruthProvider
 
 
 
@@ -133,163 +134,8 @@ class ChatMessage:
 
 
 # =============================================================================
-# MOCK DATA STORE (Until production orchestration endpoints are ready)
+# MOCK DATA STORE REMOVED — replaced by OrchestratorTruthProvider
 # =============================================================================
-
-class MockDataStore:
-    """
-    Placeholder data for UI development.
-    TODO: Replace with production orchestration API calls.
-    
-    Future endpoints needed:
-    - GET /api/inbox/threads
-    - GET /api/inbox/threads/:id
-    - POST /api/inbox/threads/:id/reply
-    - POST /api/inbox/threads/:id/action
-    - GET /api/runs
-    - POST /api/runs/:id/dispatch
-    - POST /api/runs/:id/cancel
-    - GET /api/chat/history
-    - POST /api/chat/send
-    """
-    
-    # All 20 sources + system sources as placeholders
-    SOURCES = {
-        # Human messaging
-        "email_personal": ("mail-unread-symbolic", Identity.ME),
-        "email_business": ("mail-unread-symbolic", Identity.MINDSONG),
-        "sms": ("phone-symbolic", Identity.ME),
-        "imessage": ("phone-apple-symbolic", Identity.ME),
-        "github": ("system-software-install-symbolic", Identity.MINDSONG),
-        "discord": ("user-available-symbolic", Identity.MINDSONG),
-        "slack": ("user-available-symbolic", Identity.MINDSONG),
-        "telegram": ("mail-send-symbolic", Identity.MINDSONG),
-        "whatsapp": ("phone-symbolic", Identity.MINDSONG),
-        "instagram_dm": ("camera-photo-symbolic", Identity.MINDSONG),
-        "instagram_comment": ("camera-photo-symbolic", Identity.MINDSONG),
-        "youtube_comment": ("video-display-symbolic", Identity.MINDSONG),
-        "twitter_dm": ("user-available-symbolic", Identity.MINDSONG),
-        "twitter_mention": ("user-available-symbolic", Identity.MINDSONG),
-        "linkedin": ("avatar-default-symbolic", Identity.MINDSONG),
-        "reddit": ("user-available-symbolic", Identity.MINDSONG),
-        "twitch_chat": ("video-display-symbolic", Identity.MINDSONG),
-        "signal": ("channel-secure-symbolic", Identity.ME),
-        "matrix": ("network-server-symbolic", Identity.MINDSONG),
-        "rss": ("application-rss+xml-symbolic", Identity.MINDSONG),
-        # System sources
-        "ops_alert": ("dialog-warning-symbolic", Identity.MINDSONG),
-        "orchestrator": ("system-run-symbolic", Identity.MINDSONG),
-        "stackkraft": ("media-playback-start-symbolic", Identity.MINDSONG),
-        "service_health": ("emblem-ok-symbolic", Identity.MINDSONG),
-    }
-    
-    @classmethod
-    def get_mock_inbox(cls) -> List[InboxThread]:
-        """Generate mock inbox threads."""
-        now = datetime.now()
-        
-        threads = [
-            InboxThread(
-                id="1", source="email_personal", source_icon="mail-unread-symbolic",
-                identity=Identity.ME, sender="Mom", preview="Hey, are you coming to dinner Sunday?",
-                bucket=Bucket.NOW, priority=0, timestamp=now, suggested_action="Reply"
-            ),
-            InboxThread(
-                id="2", source="github", source_icon="system-software-install-symbolic",
-                identity=Identity.MINDSONG, sender="dependabot[bot]", preview="Bump axios from 1.6.0 to 1.6.2",
-                bucket=Bucket.QUEUED, priority=2, timestamp=now, suggested_action="Approve"
-            ),
-            InboxThread(
-                id="3", source="discord", source_icon="user-available-symbolic",
-                identity=Identity.MINDSONG, sender="@techfan42", preview="Love the new video! How did you set up...",
-                bucket=Bucket.QUEUED, priority=1, timestamp=now, suggested_action="Reply"
-            ),
-            InboxThread(
-                id="4", source="youtube_comment", source_icon="video-display-symbolic",
-                identity=Identity.MINDSONG, sender="MusicLover99", preview="This is exactly what I needed! 🔥",
-                bucket=Bucket.FYI, priority=2, timestamp=now, suggested_action="Like"
-            ),
-            InboxThread(
-                id="5", source="ops_alert", source_icon="dialog-warning-symbolic",
-                identity=Identity.MINDSONG, sender="Grafana", preview="GPU1 temp > 55°C for 5 minutes",
-                bucket=Bucket.NOW, priority=0, timestamp=now, suggested_action="Investigate"
-            ),
-            InboxThread(
-                id="6", source="instagram_dm", source_icon="camera-photo-symbolic",
-                identity=Identity.MINDSONG, sender="@producer_beats", preview="Collab? I make beats in your style",
-                bucket=Bucket.QUEUED, priority=1, timestamp=now, suggested_action="Reply"
-            ),
-            InboxThread(
-                id="7", source="twitter_mention", source_icon="user-available-symbolic",
-                identity=Identity.MINDSONG, sender="@AIEnthusiast", preview="@novaxe your local LLM setup is insane!",
-                bucket=Bucket.FYI, priority=2, timestamp=now, suggested_action="Like"
-            ),
-            InboxThread(
-                id="8", source="email_business", source_icon="mail-unread-symbolic",
-                identity=Identity.MINDSONG, sender="Gumroad", preview="New sale: AI Automation Starter Kit",
-                bucket=Bucket.FYI, priority=2, timestamp=now, suggested_action="Archive"
-            ),
-            InboxThread(
-                id="9", source="slack", source_icon="user-available-symbolic",
-                identity=Identity.MINDSONG, sender="#dev-general", preview="Anyone tried the new Ollama release?",
-                bucket=Bucket.FYI, priority=2, timestamp=now, suggested_action="Reply"
-            ),
-            InboxThread(
-                id="10", source="stackkraft", source_icon="media-playback-start-symbolic",
-                identity=Identity.MINDSONG, sender="Pipeline", preview="3 clips ready for TikTok publish",
-                bucket=Bucket.QUEUED, priority=1, timestamp=now, suggested_action="Approve"
-            ),
-        ]
-        return threads
-    
-    @classmethod
-    def get_mock_runs(cls) -> List[ExecutionRun]:
-        """Generate mock execution runs."""
-        return [
-            ExecutionRun(
-                id="run-1", name="Deploy Command Center v1.2",
-                type="deployment", status=RunStatus.QUEUED,
-                started_at=None, progress_pct=None
-            ),
-            ExecutionRun(
-                id="run-2", name="StackKraft: Publish to TikTok",
-                type="content_pipeline", status=RunStatus.RUNNING,
-                started_at=datetime.now(), progress_pct=45
-            ),
-            ExecutionRun(
-                id="run-3", name="Backup PostgreSQL",
-                type="orchestrator", status=RunStatus.COMPLETED,
-                started_at=datetime.now(), progress_pct=100, can_cancel=False
-            ),
-            ExecutionRun(
-                id="run-4", name="Sync MindSong to Mac Studio",
-                type="orchestrator", status=RunStatus.FAILED,
-                started_at=datetime.now(), progress_pct=67, can_cancel=False
-            ),
-        ]
-    
-    @classmethod
-    def get_mock_chat(cls) -> List[ChatMessage]:
-        """Generate mock chat history."""
-        now = datetime.now()
-        return [
-            ChatMessage(
-                id="msg-1", role="system",
-                content="Connected to ROXY (local) • qwen2.5:14b • MindSong context",
-                timestamp=now
-            ),
-            ChatMessage(
-                id="msg-2", role="user",
-                content="Check the GPU temps and deploy the fix if everything looks good",
-                timestamp=now
-            ),
-            ChatMessage(
-                id="msg-3", role="assistant",
-                content="GPU0 (W7900) is at 38°C, GPU1 (W7800) at 52°C - both within normal range. "
-                        "The deployment is ready. Should I proceed with the deploy?",
-                timestamp=now
-            ),
-        ]
 
 
 # =============================================================================
@@ -425,8 +271,19 @@ class InboxThreadRow(Gtk.ListBoxRow):
         actions_row.append(roxy_btn)
     
     def _on_action(self, button):
-        """Handle action click - TODO: wire to a future orchestration API."""
+        """Handle action click — log and show feedback."""
         print(f"[Inbox] Action '{self.thread.suggested_action}' on thread {self.thread.id}")
+        # For now: show a transient dialog since full orchestration API is not yet wired
+        dialog = Gtk.MessageDialog(
+            transient_for=self.get_root(),
+            modal=True,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text=f"Action: {self.thread.suggested_action}",
+        )
+        dialog.set_secondary_text(f"Thread: {self.thread.sender}\nPreview: {self.thread.preview[:80]}\n\nFull orchestration API not yet wired — logged for owner review.")
+        dialog.connect("response", lambda d, r: d.destroy())
+        dialog.show()
 
 
 class TriageColumn(Gtk.Box):
@@ -442,7 +299,7 @@ class TriageColumn(Gtk.Box):
         self._threads: List[InboxThread] = []
         
         self._build_ui()
-        self._load_mock_data()
+        self._load_data()
     
     def _build_ui(self):
         # Header
@@ -515,8 +372,25 @@ class TriageColumn(Gtk.Box):
         self._current_bucket = bucket
         self._refresh_list()
     
-    def _load_mock_data(self):
-        self._threads = MockDataStore.get_mock_inbox()
+    def _load_data(self):
+        """Load inbox threads from canonical sources."""
+        raw_threads = OrchestratorTruthProvider.get_inbox_threads()
+        self._threads = [
+            InboxThread(
+                id=t["id"],
+                source=t["source"],
+                source_icon=t["source_icon"],
+                identity=Identity.MINDSONG if t["identity"] == "mindsong" else Identity.ME,
+                sender=t["sender"],
+                preview=t["preview"],
+                bucket=Bucket.NOW if t["bucket"] == "now" else Bucket.QUEUED if t["bucket"] == "queued" else Bucket.FYI,
+                priority=t["priority"],
+                timestamp=t["timestamp"],
+                unread=t.get("unread", True),
+                suggested_action=t.get("suggested_action", "Review"),
+            )
+            for t in raw_threads
+        ]
         self._refresh_list()
     
     def _refresh_list(self):
@@ -2116,7 +1990,7 @@ class ExecuteColumn(Gtk.Box):
         self._runs: List[ExecutionRun] = []
         
         self._build_ui()
-        self._load_mock_data()
+        self._load_data()
     
     def _build_ui(self):
         # Header
@@ -2136,7 +2010,8 @@ class ExecuteColumn(Gtk.Box):
         refresh_btn = Gtk.Button()
         refresh_btn.set_icon_name("view-refresh-symbolic")
         refresh_btn.add_css_class("flat")
-        refresh_btn.set_tooltip_text("Refresh")
+        refresh_btn.set_tooltip_text("Refresh from canonical sources")
+        refresh_btn.connect("clicked", self._on_refresh)
         header.append(refresh_btn)
         
         # Runs list
@@ -2159,9 +2034,33 @@ class ExecuteColumn(Gtk.Box):
         all_logs_btn.add_css_class("flat")
         footer.append(all_logs_btn)
     
-    def _load_mock_data(self):
-        self._runs = MockDataStore.get_mock_runs()
+    def _load_data(self):
+        """Load execution runs from canonical sources."""
+        raw_runs = OrchestratorTruthProvider.get_runs()
+        status_map = {
+            "queued": RunStatus.QUEUED,
+            "running": RunStatus.RUNNING,
+            "completed": RunStatus.COMPLETED,
+            "failed": RunStatus.FAILED,
+            "cancelled": RunStatus.CANCELLED,
+        }
+        self._runs = [
+            ExecutionRun(
+                id=r["id"],
+                name=r["name"],
+                type=r.get("type", "orchestrator"),
+                status=status_map.get(r["status"], RunStatus.QUEUED),
+                started_at=r.get("started_at"),
+                progress_pct=r.get("progress_pct"),
+                can_cancel=r.get("can_cancel", False),
+            )
+            for r in raw_runs
+        ]
         self._refresh_list()
+
+    def _on_refresh(self, button):
+        """Refresh runs from canonical sources."""
+        self._load_data()
     
     def _refresh_list(self):
         # Clear

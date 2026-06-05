@@ -408,11 +408,16 @@ class MissionTruthProvider:
     def get_inbox_threads(cls) -> List[dict]:
         """Return real inbox-like items from blockers + campaigns."""
         threads = []
+        seen_ids: set = set()
         civ = cls._read_json(CIVILIZATION_HEALTH_PATH)
         if civ:
             for blocker in civ.get("blockers", []):
+                bid = f"blocker-{hashlib.sha256(str(blocker).encode()).hexdigest()[:8]}"
+                if bid in seen_ids:
+                    continue
+                seen_ids.add(bid)
                 threads.append({
-                    "id": f"blocker-{hashlib.sha256(str(blocker).encode()).hexdigest()[:8]}",
+                    "id": bid,
                     "source": "ops_alert",
                     "sender": "Civilization Health",
                     "preview": str(blocker),
@@ -420,11 +425,29 @@ class MissionTruthProvider:
                     "timestamp": civ.get("generatedAt", ""),
                     "suggested_action": "Investigate",
                 })
-        # Add campaign items as inbox threads
+        # Add campaign items as inbox threads (deduplicated by campaignId)
+        campaigns_by_id: Dict[str, dict] = {}
         for campaign in cls._read_campaigns():
+            cid = campaign.get("campaignId", "unknown")
+            existing = campaigns_by_id.get(cid)
+            if existing is None:
+                campaigns_by_id[cid] = campaign
+            else:
+                try:
+                    new_ts = campaign.get("updatedAt", "")
+                    old_ts = existing.get("updatedAt", "")
+                    if new_ts > old_ts:
+                        campaigns_by_id[cid] = campaign
+                except Exception:
+                    pass
+        for campaign in campaigns_by_id.values():
             if campaign.get("status") == "active":
+                cid = f"campaign-{campaign.get('campaignId', 'unknown')}"
+                if cid in seen_ids:
+                    continue
+                seen_ids.add(cid)
                 threads.append({
-                    "id": f"campaign-{campaign.get('campaignId', 'unknown')}",
+                    "id": cid,
                     "source": "orchestrator",
                     "sender": campaign.get("routedBy", "Regent"),
                     "preview": campaign.get("intent", ""),
