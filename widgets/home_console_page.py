@@ -1524,6 +1524,47 @@ class TalkColumn(Gtk.Box):
         print("[Talk] Voice input not yet implemented (Phase 2)")
         # In Phase 2: self._voice_service.start_recording()
     
+    def _detect_natural_language_intent(self, text: str) -> str:
+        """Detect routing intent from natural language. Returns CHAT/RAG/EXEC/""."""
+        t = text.lower().strip()
+        
+        # EXEC patterns: run commands, execute scripts, start/stop services
+        exec_patterns = [
+            r"\b(run|execute|exec|start|stop|restart|kill)\b.*\b(script|service|command|backup|deploy|build|test)",
+            r"\b(back me up|do a backup|deploy|run the|execute the)\b",
+            r"\b(show|list|get)\b.*\b(status|logs|processes|services)\b",
+        ]
+        import re
+        for p in exec_patterns:
+            if re.search(p, t, re.IGNORECASE):
+                return "EXEC"
+        
+        # RAG patterns: memory retrieval, knowledge queries
+        rag_patterns = [
+            r"\b(what do you remember|what do you know|what do we know)\b",
+            r"\b(what happened|tell me about|explain|summarize|search for|find|look up)\b.*\b(in the last|about|regarding|on|corpus|ORICO|document|file|dataset)\b",
+            r"\b(look up|retrieve|query|search)\b",
+            r"\b(ORICO|corpus|training|dataset|document|file)\b",
+            r"\b(what|where|how|when|why|who|status|count|info)\b.*\b(ORICO|corpus|training|dataset|document|file)\b",
+            r"\b(supervillain check|system status|health check|audit)\b",
+        ]
+        for p in rag_patterns:
+            if re.search(p, t, re.IGNORECASE):
+                return "RAG"
+        
+        # CHAT patterns: direct conversation, no retrieval needed
+        chat_patterns = [
+            r"^(hi|hello|hey|howdy|greetings)\b",
+            r"\b(how are you|what's up|how's it going|good morning|good evening)\b",
+            r"\b(thank you|thanks|please|sorry)\b",
+            r"^(yes|no|maybe|ok|sure|got it|understood)$",
+        ]
+        for p in chat_patterns:
+            if re.search(p, t, re.IGNORECASE):
+                return "CHAT"
+        
+        return ""
+    
     def _on_send(self, widget):
         """Send message to local Ollama."""
         text = self.entry.get_text().strip()
@@ -1539,10 +1580,27 @@ class TalkColumn(Gtk.Box):
 
         self.entry.set_text("")
         
+        # Phase 3: Natural language routing — detect intent when in AUTO mode
+        detected_route = ""
+        effective_route = self._routing_mode
+        if self._routing_mode == "AUTO":
+            detected_route = self._detect_natural_language_intent(text)
+            if detected_route:
+                effective_route = detected_route
+                # Briefly flash the detected route in status
+                if self._status_label:
+                    self._status_label.set_label(f"🔀 AUTO → {detected_route}")
+                    # Reset after 3 seconds
+                    def _reset_status():
+                        if self._status_label:
+                            self._status_label.set_label("Ready")
+                        return False
+                    GLib.timeout_add_seconds(3, _reset_status)
+        
         # Pass operator controls to chat service (Chief's Truth Panel)
         self._chat_service.send_message(
             text, 
-            routing_mode=self._routing_mode if self._routing_mode != "AUTO" else "",
+            routing_mode=effective_route if effective_route != "AUTO" else "",
             pool=self._pool_mode if self._pool_mode != "AUTO" else ""
         )
 
