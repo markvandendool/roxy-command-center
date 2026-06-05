@@ -230,6 +230,7 @@ class AgentCard(Gtk.Box):
             ("🔄 Refresh", "refresh"),
             ("📤 Receipt", "receipt"),
             ("💻 Terminal", "terminal"),
+            ("📋 Copy", "copy"),
         ]:
             btn = Gtk.Button(label=label)
             btn.add_css_class("flat")
@@ -408,6 +409,16 @@ class AgentsPage(Gtk.ScrolledWindow):
         if status in ["healthy", "warn", "blocked"]:
             card.add_css_class(f"status-{status}")
     
+    @staticmethod
+    def _format_age(seconds: int) -> str:
+        if seconds < 60:
+            return f"{seconds}s ago"
+        if seconds < 3600:
+            return f"{seconds//60}m ago"
+        if seconds < 86400:
+            return f"{seconds//3600}h ago"
+        return f"{seconds//86400}d ago"
+    
     def _on_filter_toggled(self, btn, status: str):
         if btn.get_active():
             self._filter_status = status
@@ -479,26 +490,148 @@ class AgentsPage(Gtk.ScrolledWindow):
     
     def _on_agent_action(self, action: str, packet: AgentContextPacketV1):
         if action == "check":
-            self.diagnose_output.set_label(f"Checking {packet.agent_id}...")
-            # TODO: Implement check action
+            self._do_check_agent(packet)
         elif action == "refresh":
-            self.diagnose_output.set_label(f"Refreshing context for {packet.agent_id}...")
-            # TODO: Implement refresh action
+            self._do_refresh_agent(packet)
         elif action == "receipt":
-            if packet.last_receipt:
-                file_path = packet.last_receipt.get("_file", "")
-                self.diagnose_output.set_label(f"Receipt: {file_path}")
-            else:
-                self.diagnose_output.set_label(f"No receipt found for {packet.agent_id}")
+            self._do_show_receipt(packet)
         elif action == "terminal":
-            if packet.session_type == "tmux" and packet.session_name:
-                parts = packet.session_name.split(":")
-                if len(parts) == 2:
-                    session, window = parts
-                    cmd = f"tmux switch-client -t {session}:{window}"
-                    self.diagnose_output.set_label(f"Terminal: {cmd}")
+            self._do_open_terminal(packet)
+        elif action == "copy":
+            self._do_copy_packet(packet)
+    
+    def _do_check_agent(self, packet: AgentContextPacketV1):
+        """Check if agent process is alive and show diagnostics."""
+        import subprocess
+        lines = [f"=== Agent Check: {packet.agent_id} ==="]
+        
+        # Check process
+        if packet.pid:
+            result = subprocess.run(
+                ["ps", "-p", str(packet.pid), "-o", "pid,ppid,pcpu,pmem,tty,stat,time,comm,args"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                lines.append(f"Process: {result.stdout.strip()}")
             else:
-                self.diagnose_output.set_label(f"PID {packet.pid}: no tmux session")
+                lines.append(f"⚠️ Process {packet.pid} NOT FOUND")
+        
+        # Check children
+        if packet.child_processes:
+            lines.append(f"Children: {len(packet.child_processes)}")
+            for child in packet.child_processes[:5]:
+                lines.append(f"  PID {child['pid']}: {child['cmd']} (CPU {child.get('cpu', 0):.1f}%)")
+        
+        # Check tmux session
+        if packet.session_type == "tmux" and packet.session_name:
+            parts = packet.session_name.split(":")
+            if len(parts) == 2:
+                session, window = parts
+                result = subprocess.run(
+                    ["tmux", "list-windows", "-t", session, "-F", "#{window_name}"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    windows = result.stdout.strip().split("\n")
+                    lines.append(f"Tmux windows: {len(windows)}")
+        
+        lines.append(f"Health: {packet.health_score}/100 | Status: {packet.status}")
+        if packet.blocked_reason:
+            lines.append(f"⚠️ Blocked: {packet.blocked_reason}")
+        if packet.next_action:
+            lines.append(f"➡️ Recommendation: {packet.next_action}")
+        
+        self.diagnose_output.set_label("\n".join(lines))
+    
+    def _do_refresh_agent(self, packet: AgentContextPacketV1):
+        """Refresh context for a single agent by re-scanning."""
+        self._packets = self._discovery.scan()
+        self._update_summary()
+        self._refresh_cards()
+        self.diagnose_output.set_label(f"Refreshed {packet.agent_id} — re-scanned all agents")
+    
+    def _do_show_receipt(self, packet: AgentContextPacketV1):
+        """Show receipt contents in the diagnose output."""
+        if not packet.last_receipt:
+            self.diagnose_output.set_label(f"No receipt found for {packet.agent_id}")
+            return
+        
+        import json
+        file_path = packet.last_receipt.get("_file", "")
+        if file_path and Path(file_path).exists():
+            try:
+                data = json.loads(Path(file_path).read_text())
+                # Remove internal fields for display
+                data.pop("_file", None)
+                text = json.dumps(data, indent=2, default=str)[:1500]
+                self.diagnose_output.set_label(f"Receipt: {Path(file_path).name}\n{text}")
+            except Exception as e:
+                self.diagnose_output.set_label(f"Error reading receipt: {e}")
+        else:
+            # Show in-memory receipt data
+            data = dict(packet.last_receipt)
+            data.pop("_file", None)
+            text = json.dumps(data, indent=2, default=str)[:1500]
+            self.diagnose_output.set_label(f"Receipt (memory):\n{text}")
+    
+    def _do_open_terminal(self, packet: AgentContextPacketV1):
+        """Open terminal for the agent (tmux switch or process info)."""
+        import subprocess
+        if packet.session_type == "tmux" and packet.session_name:
+            parts = packet.session_name.split(":")
+            if len(parts) == 2:
+                session, window = parts
+                # Try to switch tmux client
+                try:
+                    subprocess.run(
+                        ["tmux", "switch-client", "-t", f"{session}:{window}"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    self.diagnose_output.set_label(f"Switched tmux to {session}:{window}")
+                    return
+                except Exception as e:
+                    self.diagnose_output.set_label(f"tmux switch failed: {e}")
+                    return
+        
+        # Fallback: show process tree
+        if packet.pid:
+            result = subprocess.run(
+                ["pstree", "-p", str(packet.pid)],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                self.diagnose_output.set_label(f"Process tree for {packet.agent_id}:\n{result.stdout[:1000]}")
+            else:
+                self.diagnose_output.set_label(f"PID {packet.pid}: no tmux session, pstree failed")
+        else:
+            self.diagnose_output.set_label(f"No PID or tmux session for {packet.agent_id}")
+    
+    def _do_copy_packet(self, packet: AgentContextPacketV1):
+        """Copy agent packet JSON to clipboard."""
+        json_text = packet.to_json(indent=2)
+        
+        # Try wl-copy (Wayland) first, then xclip (X11)
+        import subprocess
+        copied = False
+        
+        for cmd, args in [
+            (["wl-copy"], {"input": json_text.encode()}),
+            (["xclip", "-selection", "clipboard"], {"input": json_text.encode()}),
+            (["xsel", "--clipboard", "--input"], {"input": json_text.encode()}),
+        ]:
+            try:
+                result = subprocess.run(cmd, capture_output=True, input=args["input"], timeout=2)
+                if result.returncode == 0:
+                    copied = True
+                    break
+            except Exception:
+                pass
+        
+        if copied:
+            self.diagnose_output.set_label(f"📋 Copied {packet.agent_id} packet to clipboard ({len(json_text)} chars)")
+        else:
+            # Fallback: show in output
+            self.diagnose_output.set_label(f"Clipboard unavailable. Packet:\n{json_text[:800]}")
     
     def _on_export(self, btn):
         if not self._packets:
@@ -511,10 +644,35 @@ class AgentsPage(Gtk.ScrolledWindow):
         export_dir.mkdir(parents=True, exist_ok=True)
         
         ts = __import__('datetime').datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = export_dir / f"agent-packets-{ts}.json"
-        path.write_text(json.dumps([p.to_dict() for p in self._packets], indent=2, default=str))
         
-        self.diagnose_output.set_label(f"Exported {len(self._packets)} packets to {path}")
+        # JSON export
+        json_path = export_dir / f"agent-packets-{ts}.json"
+        json_path.write_text(json.dumps([p.to_dict() for p in self._packets], indent=2, default=str))
+        
+        # Markdown export
+        md_path = export_dir / f"agent-packets-{ts}.md"
+        md_lines = ["# AgentContextPacketV1 Export", f"**Scanned:** {self._discovery._last_scan.isoformat() if self._discovery._last_scan else 'unknown'}", f"**Total agents:** {len(self._packets)}", ""]
+        
+        for p in self._packets:
+            md_lines.append(f"## {p.agent_id}")
+            md_lines.append(f"- **Lane:** {p.lane}")
+            md_lines.append(f"- **Status:** {p.status}")
+            md_lines.append(f"- **Health:** {p.health_score}/100")
+            md_lines.append(f"- **PID:** {p.pid}")
+            md_lines.append(f"- **Session:** {p.session_type}:{p.session_name}")
+            md_lines.append(f"- **CPU:** {p.cpu_percent:.1f}% | **MEM:** {p.mem_percent:.1f}%")
+            md_lines.append(f"- **HEAD:** `{p.head_short}` | **Branch:** {p.branch}")
+            md_lines.append(f"- **Dirty:** {p.dirty_count} files")
+            md_lines.append(f"- **Activity:** {self._format_age(p.last_activity_age_seconds)}")
+            if p.blocked_reason:
+                md_lines.append(f"- **⚠️ Blocked:** {p.blocked_reason}")
+            if p.next_action:
+                md_lines.append(f"- **➡️ Next:** {p.next_action}")
+            md_lines.append("")
+        
+        md_path.write_text("\n".join(md_lines))
+        
+        self.diagnose_output.set_label(f"Exported {len(self._packets)} packets:\n  JSON: {json_path.name}\n  Markdown: {md_path.name}")
     
     def _on_check_git(self, btn):
         git_state = self._discovery._read_git_state()
