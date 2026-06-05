@@ -359,6 +359,12 @@ class AgentsPage(Gtk.ScrolledWindow):
         self.hardware_btn.connect("clicked", self._on_hardware_report)
         action_bar.append(self.hardware_btn)
         
+        self.push_packet_btn = Gtk.Button(label="📦 ReleaseCaptain")
+        self.push_packet_btn.add_css_class("flat")
+        self.push_packet_btn.set_tooltip_text("Generate ReleaseCaptain push packet for GitHub publication")
+        self.push_packet_btn.connect("clicked", self._on_release_captain)
+        action_bar.append(self.push_packet_btn)
+        
         self._status_label = Gtk.Label(label="Click Scan Now to discover agents")
         self._status_label.add_css_class("caption")
         self._status_label.add_css_class("dim-label")
@@ -711,6 +717,37 @@ class AgentsPage(Gtk.ScrolledWindow):
             self.diagnose_output.set_label("\n".join(lines))
         except Exception as e:
             self.diagnose_output.set_label(f"Hardware report failed: {e}")
+    
+    def _on_release_captain(self, btn):
+        """Generate ReleaseCaptain push packet for the canonical GTK repo."""
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
+            from release_captain_packet import generate_packet, save_packet
+            
+            packet = generate_packet()
+            json_path, md_path = save_packet(packet)
+            
+            lines = [
+                "📦 ReleaseCaptain Push Packet Generated",
+                f"",
+                f"Commit: {packet.commit_short}",
+                f"Message: {packet.commit_message}",
+                f"Files: {len(packet.changed_files)} (+{packet.insertions}/-{packet.deletions})",
+                f"",
+                f"Push command:",
+                f"  cd {packet.repo_path}",
+                f"  {packet.push_command}",
+                f"",
+                f"Saved:",
+                f"  JSON: {json_path.name}",
+                f"  Markdown: {md_path.name}",
+                f"",
+                f"Rollback: {packet.rollback_commit}",
+            ]
+            self.diagnose_output.set_label("\n".join(lines))
+        except Exception as e:
+            self.diagnose_output.set_label(f"ReleaseCaptain packet failed: {e}")
     
     # Legacy update() for backward compatibility with telemetry flow
     def update(self, data: dict):
