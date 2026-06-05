@@ -43,6 +43,18 @@ import uuid
 ROXY_CHAT_PROXY_URL = os.getenv("ROXY_CHAT_PROXY_URL", "http://127.0.0.1:4001").rstrip("/")
 DEFAULT_MODEL = os.getenv("ROXY_COMMAND_CENTER_MODEL", "roxy-coder-frontier")
 
+# Lane model mapping — mirrors config/roxy/model-backends.json
+LANE_MODELS = {
+    "auto": "roxy-coder-frontier",      # Auto-routed via keyword heuristic
+    "frontier": "roxy-coder-frontier",  # :8085 Qwen3.6-27B MTP Ada
+    "judge": "roxy-cpu-supermodel",     # :8084 Qwen3-235B CPU
+    "local": "roxy-chat",               # :11434 Ollama 7B
+    "cloud": "roxy-smart",              # LiteLLM → Claude fallback
+}
+
+# Health artifact path (SSOT repo canonical truth)
+APEX_STATUS_PATH = Path("/mnt/work/ssot/mindsong-juke-hub/public/roxy/apex-status.json")
+
 # Session persistence — no localStorage in GTK; use canonical JSON file
 SESSION_PATH = Path.home() / ".config" / "roxy-command-center" / "chat-session.json"
 
@@ -248,6 +260,9 @@ class ChatService:
         self._last_model: str = "unknown"
         self._last_expert: str = "roxy"
         self._last_latency_ms: int = 0
+
+        # Lane selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
+        self._selected_lane: str = "auto"
 
         # Execution metadata (Chief's Truth Panel)
         self._last_execution_meta: dict = {}
@@ -478,6 +493,89 @@ class ChatService:
         return self._last_latency_ms
 
     # -------------------------------------------------------------------------
+    # Lane selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
+    # -------------------------------------------------------------------------
+
+    def set_lane(self, lane: str):
+        """Set explicit lane. 'auto' uses keyword heuristic."""
+        lane = lane.lower()
+        if lane not in LANE_MODELS:
+            print(f"[ChatService] Unknown lane '{lane}', defaulting to auto")
+            lane = "auto"
+        self._selected_lane = lane
+        print(f"[ChatService] Lane set to: {lane} → {LANE_MODELS[lane]}")
+
+    @property
+    def selected_lane(self) -> str:
+        return getattr(self, "_selected_lane", "auto")
+
+    def _classify_prompt(self, text: str) -> str:
+        """Classify prompt for auto lane selection."""
+        t = text.lower()
+        # Judge keywords: audit, review, verify, judge, verdict, adversarial, check quality
+        judge_keywords = ["audit", "review", "verify", "judge", "verdict", "adversarial",
+                         "check quality", "code review", "security review", "assess"]
+        if any(kw in t for kw in judge_keywords):
+            return "judge"
+        # Local keywords: summarize, quick, small, brief, short, hello
+        local_keywords = ["summarize", "quick", "small", "brief", "short summary", "hello"]
+        if any(kw in t for kw in local_keywords):
+            return "local"
+        # Default to frontier for coding, planning, architecture
+        return "frontier"
+
+    def _resolve_model(self, text: str) -> str:
+        """Resolve final model alias based on selected lane + prompt."""
+        lane = self.selected_lane
+        if lane == "auto":
+            lane = self._classify_prompt(text)
+        model = LANE_MODELS.get(lane, DEFAULT_MODEL)
+        return model
+
+    @staticmethod
+    def get_lane_health() -> Dict[str, Any]:
+        """Read canonical lane health from apex-status.json."""
+        try:
+            data = json.loads(APEX_STATUS_PATH.read_text())
+            lanes = data.get("lanes", [])
+            health = {}
+            for lane in lanes:
+                name = lane.get("name", "")
+                port = lane.get("port")
+                status = lane.get("status", "unknown")
+                truth = lane.get("truthGrade", "unknown")
+                tps = lane.get("tps")
+                # Map backend names to lane keys
+                mapping = {
+                    "ada-coder-frontier": "frontier",
+                    "llama-cpp-cpu": "judge",
+                    "ollama": "local",
+                    "cloud-anthropic": "cloud",
+                }
+                key = mapping.get(name)
+                if key:
+                    health[key] = {
+                        "name": name,
+                        "port": port,
+                        "status": status,
+                        "truthGrade": truth,
+                        "tps": tps,
+                        "healthy": status == "healthy" and truth in ("live_probe", "cloud_api"),
+                    }
+            return health
+        except Exception as exc:
+            print(f"[ChatService] Lane health read failed: {exc}")
+            return {}
+
+    def ask_judge(self, text: str) -> Optional[ChatMessage]:
+        """Send text to Judge lane (adversarial review)."""
+        prev_lane = self.selected_lane
+        self.set_lane("judge")
+        msg = self.send_message(text, routing_mode="JUDGE")
+        self.set_lane(prev_lane)
+        return msg
+
+    # -------------------------------------------------------------------------
     # Internal: ROXY harness communication
     # -------------------------------------------------------------------------
 
@@ -610,10 +708,8 @@ class ChatService:
         headers.append("Content-Type", "application/json")
 
         # Build OpenAI-compatible payload
-        model = DEFAULT_MODEL
-        # If user explicitly set a non-default model via prior meta, respect it
-        if self._last_model and self._last_model != "unknown" and self._last_model != "roxy-coder-frontier":
-            model = self._last_model
+        # Lane-aware model selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
+        model = self._resolve_model(text)
 
         # Build messages array from conversation history
         messages = self._build_messages()

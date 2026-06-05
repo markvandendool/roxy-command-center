@@ -991,3 +991,29 @@ window.compact-mode .overview-card {
 .mission-dashboard-page .moc-card.status-blocked {
     border-left: 3px solid @moc_red;
 }
+
+/* Lane Selector (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1) */
+.lane-selector-box {
+    background-color: alpha(@moc_surface_2, 0.6);
+    border-radius: 8px;
+    padding: 6px 10px;
+}
+
+.lane-health-chip {
+    font-size: 0.8em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: alpha(@moc_surface_3, 0.5);
+}
+
+.lane-health-chip.healthy {
+    color: @moc_green;
+}
+
+.lane-health-chip.unhealthy {
+    color: @moc_red;
+}
+
+.lane-health-chip.cloud {
+    color: @moc_cyan;
+}

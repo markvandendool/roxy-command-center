@@ -970,6 +970,8 @@ class TalkColumn(Gtk.Box):
         self._connect_to_roxy()
         print("[TalkColumn] Starting info polling...")
         self._start_info_polling()
+        print("[TalkColumn] Starting lane health polling...")
+        self._start_lane_health_polling()
         
         print("[TalkColumn] ========== INIT COMPLETE ==========" )
     
@@ -1001,6 +1003,13 @@ class TalkColumn(Gtk.Box):
                 idx_pool = self._pool_dropdown.get_selected()
                 if idx_pool < len(pools):
                     data["pool_mode"] = pools[idx_pool]
+            
+            # Lane selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
+            lanes = ["auto", "frontier", "judge", "local", "cloud"]
+            if hasattr(self, '_lane_dropdown'):
+                idx_lane = self._lane_dropdown.get_selected()
+                if idx_lane < len(lanes):
+                    data["lane"] = lanes[idx_lane]
                 
             settings_file.write_text(json.dumps(data, indent=2))
         except Exception as e:
@@ -1030,6 +1039,18 @@ class TalkColumn(Gtk.Box):
                 self._pool_dropdown.set_selected(pools.index(pool))
                 self._pool_mode = pool
                 print(f"[Talk] Loaded sticky pool: {pool}")
+            
+            # Lane selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
+            lane = data.get("lane", "auto")
+            lanes = ["auto", "frontier", "judge", "local", "cloud"]
+            lane_names = ["Auto", "Frontier Coder", "Judge", "Local Utility", "Cloud/API"]
+            if lane in lanes and hasattr(self, '_lane_dropdown'):
+                self._lane_dropdown.set_selected(lanes.index(lane))
+                self._chat_service.set_lane(lane)
+                name = lane_names[lanes.index(lane)]
+                if self._current_lane_label:
+                    self._current_lane_label.set_label(f"Using: {name}")
+                print(f"[Talk] Loaded sticky lane: {lane}")
                 
         except Exception as e:
             print(f"[Talk] Failed to load settings: {e}")
@@ -1257,6 +1278,54 @@ class TalkColumn(Gtk.Box):
         self._last_meta_chip.add_css_class("caption")
         self._last_meta_chip.set_tooltip_text("Last request execution details")
         operator_box.append(self._last_meta_chip)
+        
+        # === LANE SELECTOR (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1) ===
+        lane_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        lane_box.set_margin_top(4)
+        lane_box.set_margin_bottom(4)
+        input_area.append(lane_box)
+        
+        lane_label = Gtk.Label(label="Lane:")
+        lane_label.add_css_class("dim-label")
+        lane_box.append(lane_label)
+        
+        self._lane_dropdown = Gtk.DropDown.new_from_strings([
+            "Auto", "Frontier Coder", "Judge", "Local Utility", "Cloud/API"
+        ])
+        self._lane_dropdown.set_selected(0)  # Auto
+        self._lane_dropdown.set_tooltip_text(
+            "Auto=smart routing | Frontier=Qwen3.6-27B Ada :8085 | "
+            "Judge=Qwen3-235B CPU :8084 | Local=Ollama 7B :11434 | Cloud=Claude fallback"
+        )
+        self._lane_dropdown.connect("notify::selected", self._on_lane_changed)
+        lane_box.append(self._lane_dropdown)
+        
+        # Lane health chips
+        self._lane_health_chips: Dict[str, Gtk.Label] = {}
+        for lane_key, label_text in [
+            ("frontier", "Ada"),
+            ("judge", "Judge"),
+            ("local", "Ollama"),
+            ("cloud", "Cloud"),
+        ]:
+            chip = Gtk.Label(label=f"{label_text}: --")
+            chip.add_css_class("dim-label")
+            chip.add_css_class("caption")
+            chip.set_tooltip_text(f"{label_text} lane health")
+            lane_box.append(chip)
+            self._lane_health_chips[lane_key] = chip
+        
+        # Currently using label
+        self._current_lane_label = Gtk.Label(label="Using: Auto")
+        self._current_lane_label.add_css_class("dim-label")
+        self._current_lane_label.add_css_class("caption")
+        self._current_lane_label.set_margin_start(8)
+        lane_box.append(self._current_lane_label)
+        
+        # Spacer
+        lane_spacer = Gtk.Box()
+        lane_spacer.set_hexpand(True)
+        lane_box.append(lane_spacer)
         
         # Phase 4: Save-authority toolbar
         save_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -1554,6 +1623,41 @@ class TalkColumn(Gtk.Box):
         )
         widget = ChatMessage_Widget(ui_message)
         self.chat_box.append(widget)
+        
+        # Add "Ask Judge" button for assistant messages (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
+        if message.role == "assistant":
+            health = self._chat_service.get_lane_health()
+            judge_healthy = health.get("judge", {}).get("healthy", False)
+            
+            judge_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            judge_box.set_margin_start(12)
+            judge_box.set_margin_end(12)
+            judge_box.set_margin_bottom(8)
+            self.chat_box.append(judge_box)
+            
+            judge_btn = Gtk.Button(label="⚖️ Ask Judge")
+            judge_btn.add_css_class("pill")
+            judge_btn.add_css_class("caption")
+            if judge_healthy:
+                judge_btn.add_css_class("suggested-action")
+                judge_btn.set_tooltip_text("Send this response to Judge for adversarial review")
+                judge_btn.connect("clicked", self._on_ask_judge, message.content)
+            else:
+                judge_btn.set_sensitive(False)
+                judge_btn.set_tooltip_text("Judge lane is not available")
+            judge_box.append(judge_btn)
+            
+            send_to_judge_btn = Gtk.Button(label="📤 Send plan to Judge")
+            send_to_judge_btn.add_css_class("pill")
+            send_to_judge_btn.add_css_class("caption")
+            if judge_healthy:
+                send_to_judge_btn.set_tooltip_text("Send current plan/response to Judge for deep review")
+                send_to_judge_btn.connect("clicked", self._on_ask_judge, message.content)
+            else:
+                send_to_judge_btn.set_sensitive(False)
+                send_to_judge_btn.set_tooltip_text("Judge lane is not available")
+            judge_box.append(send_to_judge_btn)
+        
         self._scroll_to_bottom()
         
         # Update latency chip for assistant messages
@@ -1650,6 +1754,59 @@ class TalkColumn(Gtk.Box):
         self._pool_mode = pools[idx] if idx < len(pools) else "AUTO"
         print(f"[Talk] Pool: {self._pool_mode}")
         self._save_settings()
+    
+    def _on_lane_changed(self, dropdown, _pspec):
+        """Handle lane selection change."""
+        lanes = ["auto", "frontier", "judge", "local", "cloud"]
+        names = ["Auto", "Frontier Coder", "Judge", "Local Utility", "Cloud/API"]
+        idx = dropdown.get_selected()
+        lane = lanes[idx] if idx < len(lanes) else "auto"
+        name = names[idx] if idx < len(names) else "Auto"
+        self._chat_service.set_lane(lane)
+        if self._current_lane_label:
+            self._current_lane_label.set_label(f"Using: {name}")
+        print(f"[Talk] Lane: {lane} → {self._chat_service.selected_lane}")
+        self._save_settings()
+        self._update_lane_health_display()
+    
+    def _update_lane_health_display(self):
+        """Poll and display lane health from canonical apex-status.json."""
+        try:
+            health = self._chat_service.get_lane_health()
+            for lane_key, chip in self._lane_health_chips.items():
+                info = health.get(lane_key)
+                if not info:
+                    chip.set_label(f"{chip.get_tooltip_text().split()[0]}: ❓")
+                    continue
+                name = chip.get_tooltip_text().split()[0]
+                if info.get("healthy"):
+                    tps = info.get("tps")
+                    tps_str = f" {tps}t/s" if tps else ""
+                    chip.set_label(f"{name}: 🟢{tps_str}")
+                elif info.get("truthGrade") == "cloud_api":
+                    chip.set_label(f"{name}: ☁️")
+                elif info.get("truthGrade") in ("stale_log", "retired"):
+                    chip.set_label(f"{name}: ⚪")
+                else:
+                    chip.set_label(f"{name}: 🔴")
+        except Exception as exc:
+            print(f"[Talk] Lane health update failed: {exc}")
+    
+    def _start_lane_health_polling(self):
+        """Start periodic lane health updates every 30s."""
+        self._update_lane_health_display()
+        def _poll():
+            self._update_lane_health_display()
+            return True  # Continue polling
+        GLib.timeout_add_seconds(30, _poll)
+    
+    def _on_ask_judge(self, button, text: str):
+        """Send current message/plan to Judge lane for adversarial review."""
+        print(f"[Talk] Asking Judge to review: {text[:60]}...")
+        self._chat_service.ask_judge(
+            f"Please perform an adversarial review of the following:\n\n{text}\n\n"
+            "Identify any errors, assumptions, gaps, or quality issues."
+        )
     
     def _on_speak_toggle(self, button):
         """Toggle speak mode (Option B)."""
