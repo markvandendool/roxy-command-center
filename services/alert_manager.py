@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Callable, Dict, List, Any
 from enum import Enum
 from collections import deque
+from services.operator_kernel_alert_bridge import append_to_attention_ledger
 
 ALERT_LOG_PATH = Path.home() / ".local/share/roxy-command-center/alerts.jsonl"
 CONFIG_PATH = Path.home() / ".config/roxy-command-center/alert_config.json"
@@ -321,6 +322,7 @@ class AlertManager:
             }
             with open(ALERT_LOG_PATH, "a") as f:
                 f.write(json.dumps(entry) + "\n")
+            append_to_attention_ledger(entry)
         except Exception as e:
             print(f"[AlertManager] Log error: {e}")
     
