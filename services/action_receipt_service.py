@@ -14,6 +14,7 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
+from services.operator_kernel_receipt_bridge import dual_write_receipt
 
 RECEIPT_DIR = Path(__file__).parent.parent / "output" / "roxy-command-center" / "actions"
 
@@ -65,6 +66,7 @@ def write_action_receipt(
 
     path.write_text(json.dumps(receipt, indent=2, default=str), encoding="utf-8")
     print(f"[ActionReceipt] Written: {path}")
+    dual_write_receipt(receipt)
     return path
 
 
