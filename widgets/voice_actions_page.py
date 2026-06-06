@@ -133,6 +133,21 @@ class VoiceActionsPage(Gtk.ScrolledWindow):
                 lbl.add_css_class("moc-row-subtitle")
                 lbl.set_xalign(0)
                 detail.append(lbl)
+
+            # Test speak row
+            test_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            test_box.set_margin_top(8)
+            detail.append(test_box)
+
+            self._speak_entry = Gtk.Entry()
+            self._speak_entry.set_placeholder_text("Type text to speak aloud...")
+            self._speak_entry.set_hexpand(True)
+            test_box.append(self._speak_entry)
+
+            speak_btn = Gtk.Button(label="🔊 Speak")
+            speak_btn.add_css_class("suggested-action")
+            speak_btn.connect("clicked", self._on_test_speak)
+            test_box.append(speak_btn)
         except Exception as e:
             err = Gtk.Label(label=f"⚠️ TTS check error: {e}")
             err.add_css_class("caption")
@@ -232,12 +247,18 @@ class VoiceActionsPage(Gtk.ScrolledWindow):
                 self._ptt_button.set_label("🎙 Hold to Speak")
                 return
 
+            if not result.get("routed"):
+                reason = result.get("reason", "no speech")
+                self._ptt_status.set_label(f"No command: {reason}")
+                self._ptt_button.set_label("🎙 Hold to Speak")
+                return
+
             transcript = result.get("transcript", "")
             routed = result.get("action", "unknown")
             response = result.get("response", "")
             receipt = result.get("receiptPath", "")
 
-            self._ptt_status.set_label(f"Heard: '{transcript}' → {routed}")
+            self._ptt_status.set_label(f"🔊 Heard: '{transcript}' → {routed}")
             self._add_log_entry(transcript, routed, response)
             self._update_voice_receipts()
 
@@ -245,6 +266,22 @@ class VoiceActionsPage(Gtk.ScrolledWindow):
             self._ptt_status.set_label(f"Stop error: {e}")
         finally:
             self._ptt_button.set_label("🎙 Hold to Speak")
+
+    def _on_test_speak(self, button):
+        """Test TTS: speak the entry text aloud."""
+        text = self._speak_entry.get_text().strip()
+        if not text:
+            self._ptt_status.set_label("Enter text to speak")
+            return
+        self._ptt_status.set_label(f"🔊 Speaking: '{text[:40]}...'")
+        try:
+            from services.voice_speak_service import get_voice_speak_service
+            svc = get_voice_speak_service()
+            result = svc.speak(text, source="test-button")
+            provider = result.get("provider", "unknown")
+            self._ptt_status.set_label(f"✅ Spoken via {provider}: '{text[:40]}...'")
+        except Exception as e:
+            self._ptt_status.set_label(f"❌ Speak failed: {e}")
 
     def _add_log_entry(self, transcript: str, action: str, response: str):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)

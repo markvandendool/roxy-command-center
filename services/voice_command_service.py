@@ -75,7 +75,11 @@ class VoiceCommandService:
             return {**result, "routed": False, "reason": "empty transcript"}
 
         routed = self._route_transcript(transcript)
-        return {**result, "routed": True, "action": routed}
+        # Flatten routed action result into top-level keys so UI can read
+        # action, response, receiptPath as simple strings
+        merged = {**result, "routed": True}
+        merged.update(routed)
+        return merged
 
     def toggle_recording(self) -> Dict[str, Any]:
         """Toggle recording state."""
@@ -107,10 +111,17 @@ class VoiceCommandService:
         return self._do_unknown_command(transcript)
 
     def _speak_and_receipt(self, action: str, transcript: str, response: str, payload: Dict[str, Any]) -> Path:
-        """Speak response aloud and write action receipt."""
-        # Speak the response
-        speak_svc = get_voice_speak_service()
-        speak_result = speak_svc.speak(response, source=f"voice-{action}")
+        """Speak response aloud (async) and write action receipt."""
+        # Fire speak async so GTK UI doesn't freeze during API call + playback
+        def _do_speak():
+            try:
+                speak_svc = get_voice_speak_service()
+                speak_svc.speak(response, source=f"voice-{action}")
+            except Exception:
+                pass  # Speak errors are non-fatal; speak service writes its own receipt
+
+        import threading
+        threading.Thread(target=_do_speak, daemon=True).start()
 
         receipt_path = write_action_receipt(
             action=f"voice_{action}",
@@ -120,7 +131,7 @@ class VoiceCommandService:
             target_agent="roxy-voice",
             target_lane="voice-command",
             authority="operator",
-            payload={**payload, "speak": speak_result},
+            payload={**payload, "response": response, "speakInitiated": True},
             next_action="display response",
         )
         self._last_receipt = receipt_path
