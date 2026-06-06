@@ -22,6 +22,7 @@ from services.action_receipt_service import write_action_receipt
 from services.judge_service import get_judge_service
 from services.kimi_assignment_service import create_assignment_packet
 from services.investigation_service import create_investigation_packet
+from services.voice_speak_service import get_voice_speak_service
 
 DICTATION_URL = "http://127.0.0.1:10500"
 
@@ -105,7 +106,12 @@ class VoiceCommandService:
         # Unknown
         return self._do_unknown_command(transcript)
 
-    def _write_voice_receipt(self, action: str, transcript: str, payload: Dict[str, Any]) -> Path:
+    def _speak_and_receipt(self, action: str, transcript: str, response: str, payload: Dict[str, Any]) -> Path:
+        """Speak response aloud and write action receipt."""
+        # Speak the response
+        speak_svc = get_voice_speak_service()
+        speak_result = speak_svc.speak(response, source=f"voice-{action}")
+
         receipt_path = write_action_receipt(
             action=f"voice_{action}",
             mission_id="voice-command",
@@ -114,7 +120,7 @@ class VoiceCommandService:
             target_agent="roxy-voice",
             target_lane="voice-command",
             authority="operator",
-            payload=payload,
+            payload={**payload, "speak": speak_result},
             next_action="display response",
         )
         self._last_receipt = receipt_path
@@ -131,7 +137,7 @@ class VoiceCommandService:
             f"Civilization is {'green' if not blocked else 'degraded'}."
         )
 
-        receipt = self._write_voice_receipt("status", transcript, {
+        receipt = self._speak_and_receipt("status", transcript, summary, {
             "transcript": transcript,
             "missionCount": len(missions),
             "healthyCount": len(healthy),
@@ -168,7 +174,7 @@ class VoiceCommandService:
         )
 
         response = f"Sent mission '{target.name}' to Judge. Job {job.job_id} queued."
-        receipt = self._write_voice_receipt("judge", transcript, {
+        receipt = self._speak_and_receipt("judge", transcript, response, {
             "transcript": transcript,
             "missionId": target.id,
             "missionName": target.name,
@@ -196,7 +202,7 @@ class VoiceCommandService:
         packet = result["packet"]
 
         response = f"Assigned mission '{target.name}' to Kimi on {packet['targetSurface']}."
-        receipt = self._write_voice_receipt("kimi", transcript, {
+        receipt = self._speak_and_receipt("kimi", transcript, response, {
             "transcript": transcript,
             "missionId": target.id,
             "missionName": target.name,
@@ -226,7 +232,7 @@ class VoiceCommandService:
         packet = result["packet"]
 
         response = f"Opened investigation for mission '{target.name}'."
-        receipt = self._write_voice_receipt("investigate", transcript, {
+        receipt = self._speak_and_receipt("investigate", transcript, response, {
             "transcript": transcript,
             "missionId": target.id,
             "missionName": target.name,
@@ -240,7 +246,7 @@ class VoiceCommandService:
         response = (
             f"I heard: '{transcript}'. Known commands: status, ask the judge, assign Kimi, investigate."
         )
-        receipt = self._write_voice_receipt("unknown", transcript, {
+        receipt = self._speak_and_receipt("unknown", transcript, response, {
             "transcript": transcript,
             "response": response,
         })

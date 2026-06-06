@@ -47,6 +47,9 @@ class VoiceActionsPage(Gtk.ScrolledWindow):
         # Voice Foundry Status Card
         self._build_voice_status_card(main_box)
 
+        # TTS Status Card
+        self._build_tts_status_card(main_box)
+
         # Push-to-talk section
         self._build_ptt_section(main_box)
 
@@ -84,6 +87,57 @@ class VoiceActionsPage(Gtk.ScrolledWindow):
         card.append(self._voice_detail_box)
 
         self._update_voice_status()
+
+    def _build_tts_status_card(self, parent):
+        """TTS capability status."""
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card.set_margin_top(8)
+        card.set_margin_bottom(8)
+        card.add_css_class("card")
+        parent.append(card)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        card.append(header)
+
+        title = Gtk.Label(label="Text-to-Speech")
+        title.add_css_class("title-3")
+        title.set_xalign(0)
+        title.set_hexpand(True)
+        header.append(title)
+
+        detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        detail.set_margin_start(8)
+        card.append(detail)
+
+        try:
+            from services.voice_speak_service import get_voice_speak_service
+            svc = get_voice_speak_service()
+            if svc._api_key:
+                lbl = Gtk.Label(label="🟢 ElevenLabs (Jessica) — API key present")
+                lbl.add_css_class("moc-row-subtitle")
+                lbl.set_xalign(0)
+                detail.append(lbl)
+            else:
+                lbl = Gtk.Label(label="🔴 ElevenLabs — API key missing")
+                lbl.add_css_class("moc-row-subtitle")
+                lbl.set_xalign(0)
+                detail.append(lbl)
+
+            if svc._espeak_available():
+                lbl = Gtk.Label(label="🟢 espeak-ng — local fallback available")
+                lbl.add_css_class("moc-row-subtitle")
+                lbl.set_xalign(0)
+                detail.append(lbl)
+            else:
+                lbl = Gtk.Label(label="🔴 espeak-ng — not installed")
+                lbl.add_css_class("moc-row-subtitle")
+                lbl.set_xalign(0)
+                detail.append(lbl)
+        except Exception as e:
+            err = Gtk.Label(label=f"⚠️ TTS check error: {e}")
+            err.add_css_class("caption")
+            err.set_xalign(0)
+            detail.append(err)
 
     def _build_ptt_section(self, parent):
         """Push-to-talk controls."""
