@@ -16,6 +16,17 @@ SSOT_ROOT = Path("/mnt/work/ssot/mindsong-juke-hub")
 ROXY_VOICE_OP = SSOT_ROOT / "scripts" / "voice" / "roxy-wake" / "roxy_voice_operator.py"
 PYTHON = "/home/mark/.venvs/roxy-wake/bin/python"
 
+# Voice aliases mapped to Voice Foundry presets
+VOICE_ALIASES = {
+    "mark_owner": "mark_owner",
+    "rocky_tutor": "rocky_tutor",
+    "roxy_jessica": "roxy_jessica",
+    "kimi_agent": "kimi_agent",
+    "codex_agent": "codex_agent",
+    "regent_agent": "regent_agent",
+    "agent_default": "agent_default",
+}
+
 
 class VoiceOperatorService:
     """RCC-backed voice operator. GTK4 is a thin shell."""
@@ -28,10 +39,11 @@ class VoiceOperatorService:
 
     def ask(self, text: str, voice: str = "mark_owner", provider: str = "voice_foundry") -> Dict[str, Any]:
         """Text → brain → TTS via roxy_voice_operator.py."""
+        preset = VOICE_ALIASES.get(voice, voice)
         cmd = [
             PYTHON, str(ROXY_VOICE_OP),
             "--text", text,
-            "--voice", voice,
+            "--voice", preset,
             "--provider", provider,
             "--json",
         ]
@@ -40,10 +52,9 @@ class VoiceOperatorService:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=180,
+                timeout=300,
                 cwd=str(SSOT_ROOT),
             )
-            # Parse JSON from last line
             lines = result.stdout.strip().split("\n")
             json_line = next((l for l in reversed(lines) if l.strip().startswith("{")), "{}")
             data = json.loads(json_line)
@@ -57,10 +68,11 @@ class VoiceOperatorService:
 
     def speak(self, text: str, voice: str = "mark_owner") -> Dict[str, Any]:
         """Speak text directly via Voice Foundry."""
+        preset = VOICE_ALIASES.get(voice, voice)
         vf_client = SSOT_ROOT / "scripts" / "voice" / "roxy-wake" / "voice_foundry_client.py"
-        cmd = [PYTHON, str(vf_client), text, "--voice", voice, "--play"]
+        cmd = [PYTHON, str(vf_client), text, "--voice", preset, "--play"]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, cwd=str(SSOT_ROOT))
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=str(SSOT_ROOT))
             return {"ok": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr}
         except Exception as e:
             return {"ok": False, "error": str(e)}
