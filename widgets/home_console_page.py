@@ -1167,9 +1167,10 @@ class TalkColumn(Gtk.Box):
             "Auto", "Frontier Coder", "Judge", "Local Utility", "Cloud/API"
         ])
         self._lane_dropdown.set_selected(0)  # Auto
+        cloud_tip = "Cloud=Claude fallback (requires ANTHROPIC_API_KEY)" if os.environ.get("ANTHROPIC_API_KEY") else "Cloud=Claude fallback 🔒 ANTHROPIC_API_KEY not set"
         self._lane_dropdown.set_tooltip_text(
-            "Auto=smart routing | Frontier=Qwen3.6-27B Ada :8085 | "
-            "Judge=Qwen3-235B CPU :8084 | Local=Ollama 7B :11434 | Cloud=Claude fallback"
+            f"Auto=smart routing | Frontier=Qwen3.6-27B Ada :8085 | "
+            f"Judge=Qwen3-235B CPU :8084 | Local=Ollama 7B :11434 | {cloud_tip}"
         )
         self._lane_dropdown.connect("notify::selected", self._on_lane_changed)
         lane_box.append(self._lane_dropdown)
@@ -1662,6 +1663,13 @@ class TalkColumn(Gtk.Box):
         self._save_settings()
         self._update_lane_health_display()
 
+        # Credential-blocked warning for Cloud
+        if lane == "cloud" and not os.environ.get("ANTHROPIC_API_KEY"):
+            self._append_system_message(
+                "🔒 Cloud lane selected but ANTHROPIC_API_KEY is not set. "
+                "Set it in your environment or choose a different lane."
+            )
+
         # SLOW warning for Judge
         if lane == "judge":
             self._append_system_message(
@@ -1689,8 +1697,12 @@ class TalkColumn(Gtk.Box):
                         chip.set_label(f"{name}: 🟢{tps_str}")
                         chip.set_tooltip_text(f"{name} lane: healthy")
                 elif info.get("truthGrade") == "cloud_api":
-                    chip.set_label(f"{name}: ☁️")
-                    chip.set_tooltip_text(f"{name} lane: cloud API")
+                    if lane_key == "cloud" and not os.environ.get("ANTHROPIC_API_KEY"):
+                        chip.set_label(f"{name}: 🔒 No key")
+                        chip.set_tooltip_text(f"{name} lane: ANTHROPIC_API_KEY not set — cloud API unavailable")
+                    else:
+                        chip.set_label(f"{name}: ☁️")
+                        chip.set_tooltip_text(f"{name} lane: cloud API")
                 elif info.get("truthGrade") in ("stale_log", "retired"):
                     chip.set_label(f"{name}: ⚪")
                     chip.set_tooltip_text(f"{name} lane: {info.get('truthGrade')}")
