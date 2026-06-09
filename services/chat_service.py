@@ -881,7 +881,19 @@ class ChatService:
                 err_msg = data["error"]
                 if isinstance(err_msg, dict):
                     err_msg = err_msg.get("message", str(err_msg))
-                self._handle_error(f"Harness error: {err_msg}")
+                # Show clean message for known proxy rejections instead of raw diagnostics
+                if err_msg == "PROMPT_BUDGET_EXCEEDED":
+                    self._handle_error(
+                        "🔒 Prompt too large for Judge lane. "
+                        "Send a shorter plan or switch to Frontier/Auto lane."
+                    )
+                elif err_msg == "PROVIDER_CONTEXT_LIMIT_BLOCKED":
+                    self._handle_error(
+                        "🔒 Provider context limit blocked. "
+                        "Try a shorter prompt or a different lane."
+                    )
+                else:
+                    self._handle_error(f"Harness error: {err_msg}")
                 return
 
             # Extract assistant content (OpenAI format)
