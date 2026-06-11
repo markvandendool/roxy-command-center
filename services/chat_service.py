@@ -879,9 +879,14 @@ class ChatService:
             # Check for proxy-level errors
             if "error" in data and not data.get("choices"):
                 err_msg = data["error"]
+                detail = data.get("detail", "")
                 if isinstance(err_msg, dict):
                     err_msg = err_msg.get("message", str(err_msg))
-                # Show clean message for known proxy rejections instead of raw diagnostics
+
+                model = self._last_model or self._resolve_model("")
+                host = self._proxy_base_url or ROXY_CHAT_PROXY_URL
+
+                # Truth Contract: structured error with route, endpoint, and action
                 if err_msg == "PROMPT_BUDGET_EXCEEDED":
                     self._handle_error(
                         "🔒 Prompt too large for Judge lane. "
@@ -892,8 +897,27 @@ class ChatService:
                         "🔒 Provider context limit blocked. "
                         "Try a shorter prompt or a different lane."
                     )
+                elif "fetch failed" in str(err_msg).lower():
+                    # Transient network failure — give operator full context
+                    lines = [
+                        "❌ Send failed — route could not reach backend",
+                        f"Route: {model}",
+                        f"Endpoint: POST {host}/v1/chat/completions",
+                        f"Error: {err_msg}",
+                    ]
+                    if detail:
+                        lines.append(f"Detail: {str(detail)[:300]}")
+                    lines.append("Action: Retry or switch lane")
+                    self._handle_error("\n".join(lines))
                 else:
-                    self._handle_error(f"Harness error: {err_msg}")
+                    lines = [
+                        f"❌ Harness error: {err_msg}",
+                        f"Route: {model}",
+                        f"Endpoint: POST {host}/v1/chat/completions",
+                    ]
+                    if detail:
+                        lines.append(f"Detail: {str(detail)[:300]}")
+                    self._handle_error("\n".join(lines))
                 return
 
             # Extract assistant content (OpenAI format)

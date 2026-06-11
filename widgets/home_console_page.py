@@ -36,6 +36,7 @@ from services.chat_service import (
     get_chat_service, get_voice_service
 )
 from services.orchestrator_truth_provider import OrchestratorTruthProvider
+from widgets.operator_safety_rail import OperatorSafetyRail
 
 
 
@@ -2006,47 +2007,56 @@ class ExecuteColumn(Gtk.Box):
         self._load_data()
     
     def _build_ui(self):
-        # Header
+        # ── Safety Rail (Live System) ──
+        self.safety_rail = OperatorSafetyRail()
+        self.append(self.safety_rail)
+
+        # ── Progressions header ──
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.set_margin_top(12)
         header.set_margin_start(12)
         header.set_margin_end(12)
         header.set_margin_bottom(8)
         self.append(header)
-        
+
         title = Gtk.Label(label="Progressions")
         title.add_css_class("title-2")
         title.set_xalign(0)
         title.set_hexpand(True)
         header.append(title)
-        
+
         refresh_btn = Gtk.Button()
         refresh_btn.set_icon_name("view-refresh-symbolic")
         refresh_btn.add_css_class("flat")
         refresh_btn.set_tooltip_text("Refresh from canonical sources")
         refresh_btn.connect("clicked", self._on_refresh)
         header.append(refresh_btn)
-        
-        # Runs list
+
+        # ── Runs list ──
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.append(scrolled)
-        
+
         self.runs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         scrolled.set_child(self.runs_box)
-        
-        # Quick actions footer
+
+        # ── Quick actions footer ──
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         footer.set_margin_start(12)
         footer.set_margin_end(12)
         footer.set_margin_bottom(12)
         self.append(footer)
-        
+
         all_logs_btn = Gtk.Button(label="Open All Logs")
         all_logs_btn.add_css_class("flat")
         footer.append(all_logs_btn)
     
+    def update(self, data: dict):
+        """Update safety rail from daemon data."""
+        if hasattr(self, "safety_rail"):
+            self.safety_rail.update(data)
+
     def _load_data(self):
         """Load execution runs from canonical sources."""
         raw_runs = OrchestratorTruthProvider.get_runs()
@@ -2136,12 +2146,10 @@ class HomeConsolePage(Gtk.Box):
     def update(self, data: dict):
         """
         Update with daemon data.
-        
-        TODO: This will need to:
-        1. Refresh inbox from a future orchestration API
-        2. Refresh runs from orchestrator
-        3. Update context chips in talk column
+        Passes performance/system telemetry to Talk and Execute columns.
         """
-        # For now, just log that we received data
-        # The mock data is loaded on init
+        if hasattr(self, "talk") and hasattr(self.talk, "update"):
+            self.talk.update(data)
+        if hasattr(self, "execute") and hasattr(self.execute, "update"):
+            self.execute.update(data)
         pass

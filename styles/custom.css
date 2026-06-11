@@ -816,8 +816,9 @@ button.pill {
 }
 
 .user-bubble {
-    background-color: @accent_bg_color;
-    color: @accent_fg_color;
+    background-color: alpha(@moc_surface_3, 0.85);
+    color: @moc_ink_0;
+    border-left: 3px solid @moc_gold;
     border-bottom-right-radius: 4px;
 }
 
@@ -1016,4 +1017,175 @@ window.compact-mode .overview-card {
 
 .lane-health-chip.cloud {
     color: @moc_cyan;
+}
+
+/* === RCC Command Kernel Badges === */
+
+.tier-t0 {
+    background-color: alpha(@moc_green, 0.2);
+    color: @moc_green;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: monospace;
+}
+
+.tier-t1 {
+    background-color: alpha(@moc_amber, 0.2);
+    color: @moc_amber;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: monospace;
+}
+
+.tier-t2 {
+    background-color: alpha(@moc_red, 0.2);
+    color: @moc_red;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: monospace;
+}
+
+.tier-t3 {
+    background-color: alpha(#ff4444, 0.3);
+    color: #ff4444;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: monospace;
+}
+
+.world-stage {
+    background-color: alpha(@moc_cyan, 0.15);
+    color: @moc_cyan;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.world-moon {
+    background-color: alpha(@moc_purple, 0.15);
+    color: @moc_purple;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.world-backlot {
+    background-color: alpha(@moc_ink_2, 0.2);
+    color: @moc_ink_2;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.world-shared {
+    background-color: alpha(@moc_gold, 0.15);
+    color: @moc_gold;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+
+/* === Operator Safety Rail — Mission Center mini telemetry === */
+.safety-rail {
+    background-color: alpha(@moc_surface_1, 0.85);
+    border-bottom: 1px solid alpha(@moc_line_0, 0.6);
+    padding: 10px;
+}
+
+.safety-rail-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: @moc_ink_1;
+    margin-bottom: 8px;
+}
+
+.safety-metric-row {
+    padding: 5px 6px;
+    border-radius: 6px;
+    margin: 2px 0;
+}
+
+.safety-metric-row:hover {
+    background-color: alpha(@moc_surface_3, 0.5);
+}
+
+.safety-metric-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: @moc_ink_2;
+    min-width: 64px;
+}
+
+.safety-metric-value {
+    font-size: 12px;
+    font-weight: 700;
+    color: @moc_ink_0;
+    min-width: 42px;
+}
+
+.safety-metric-subtitle {
+    font-size: 10px;
+    color: @moc_ink_2;
+}
+
+.safety-metric-status-ready {
+    color: @moc_green;
+}
+
+.safety-metric-status-warn {
+    color: @moc_amber;
+}
+
+.safety-metric-status-off {
+    color: alpha(@moc_ink_2, 0.6);
+}
+
+.safety-metric-status-error {
+    color: @moc_red;
+}
+
+.safety-sparkline {
+    min-height: 18px;
+    min-width: 48px;
+}
+
+/* Route truth badge chips */
+.route-chip {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.route-chip-ready {
+    background-color: alpha(@moc_green, 0.15);
+    color: @moc_green;
+}
+
+.route-chip-warn {
+    background-color: alpha(@moc_amber, 0.15);
+    color: @moc_amber;
+}
+
+.route-chip-off {
+    background-color: alpha(@moc_ink_2, 0.1);
+    color: alpha(@moc_ink_2, 0.7);
+}
+
+.route-chip-error {
+    background-color: alpha(@moc_red, 0.15);
+    color: @moc_red;
 }
