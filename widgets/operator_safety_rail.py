@@ -73,9 +73,18 @@ class MetricRow(Gtk.Box):
         self.status_dot.set_markup("<span color='#8fa0b5'>●</span>")
         self.append(self.status_dot)
 
-    def set_value(self, value: str, subtitle: str = "", status: str = "off", history: Optional[List[float]] = None):
+    def set_value(
+        self,
+        value: str,
+        subtitle: str = "",
+        status: str = "off",
+        history: Optional[List[float]] = None,
+        tooltip: str = "",
+    ):
         self.value_label.set_label(value)
         self.subtitle_label.set_label(subtitle)
+        if tooltip:
+            self.set_tooltip_text(tooltip)
 
         # Status dot color
         rgb = _status_color(status)
@@ -154,6 +163,8 @@ class OperatorSafetyRail(Gtk.Box):
     def update(self, data: dict):
         """Update rail from daemon performance dict."""
         perf = data.get("performance") or {}
+        factory_truth = data.get("factoryTruth") or {}
+        factory_services = factory_truth.get("servicesById") or {}
         coll = get_collector()
 
         # ── System ──
@@ -206,22 +217,33 @@ class OperatorSafetyRail(Gtk.Box):
             elif "W5700X" in name or "Radeon Pro" in name:
                 self._rows["gpu_w5700x"].set_value(f"{util:.0f}%", subtitle, status, coll.get(f"gpu{i}"))
 
-        # ── Routes (from data or default to grey) ──
-        # Chat Proxy
-        proxy_ok = data.get("roxy_chat_proxy", {}).get("ok", False)
-        self._rows["proxy"].set_value(
-            "OK" if proxy_ok else "?",
-            ":4001",
-            "ready" if proxy_ok else "off"
-        )
+        # ── Routes: factory.status is the source of truth. Do not show "?"
+        # when a live RCC probe has already proved the port.
+        def _route(service_id: str, row_key: str, fallback_port: str, optional: bool = False):
+            svc = factory_services.get(service_id, {}) if isinstance(factory_services, dict) else {}
+            ready = bool(svc.get("ready"))
+            port = svc.get("port") or fallback_port
+            status_text = str(svc.get("status") or ("off" if optional else "unproven"))
+            label = "OK" if ready else ("OFF" if optional else "FAIL")
+            tooltip = (
+                f"{svc.get('label', row_key)}\n"
+                f"Source: rcc factory.status\n"
+                f"Endpoint: :{port}\n"
+                f"Status: {status_text}\n"
+                f"Verdict: {factory_truth.get('verdict', 'UNKNOWN')}"
+            )
+            self._rows[row_key].set_value(
+                label,
+                f":{port}",
+                "ready" if ready else ("off" if optional else "error"),
+                tooltip=tooltip,
+            )
 
-        # LiteLLM
-        litellm_ok = data.get("litellm", {}).get("ok", False)
-        self._rows["litellm"].set_value(
-            "OK" if litellm_ok else "?",
-            ":4000",
-            "ready" if litellm_ok else "off"
-        )
+        _route("chat_proxy", "proxy", "4001")
+        _route("litellm", "litellm", "4000")
+        _route("frontier", "route_ada", "8085")
+        _route("decode_6900xt", "route_6900xt", "8083")
+        _route("judge_235b", "route_judge", "8084")
 
         # Active route info
         active_model = data.get("active_model", "")
@@ -231,18 +253,11 @@ class OperatorSafetyRail(Gtk.Box):
             elif "6900xt-coder" in active_model.lower():
                 self._rows["route_6900xt"].set_value("ACTIVE", "", "ready")
 
-        # Judge (:8084) — check if backend listening
-        judge_ok = data.get("judge_backend", {}).get("ok", False)
-        self._rows["route_judge"].set_value(
-            "OK" if judge_ok else "OFF",
-            ":8084",
-            "ready" if judge_ok else "off"
-        )
-
-        # Ollama (:11434)
+        # Ollama (:11434) is optional. OFF is a valid explicit state.
         ollama_ok = data.get("ollama", {}).get("ok", False)
         self._rows["route_ollama"].set_value(
             "OK" if ollama_ok else "OFF",
-            ":11434",
-            "ready" if ollama_ok else "off"
+            "optional :11434",
+            "ready" if ollama_ok else "off",
+            tooltip="Optional local utility lane. Not required for factory.status PASS."
         )

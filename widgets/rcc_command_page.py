@@ -57,6 +57,7 @@ PINNED_COMMANDS = [
     "factory.models",
     "factory.walkers",
     "factory.hardware",
+    "factory.routes",
     "roxy.models",
     "agent.agents",
 ]

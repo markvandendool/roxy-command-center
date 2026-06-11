@@ -35,6 +35,8 @@ from datetime import datetime
 from enum import Enum
 import uuid
 
+from services.factory_truth_service import get_factory_truth_service
+
 
 # =============================================================================
 # CONFIGURATION
@@ -772,6 +774,32 @@ class ChatService:
         )
         self._schedule_status_updates(is_judge=is_judge)
 
+    def _factory_route_diagnostics(self, model: str) -> List[str]:
+        """Return compact factory.status diagnostics for send errors."""
+        try:
+            truth = get_factory_truth_service().snapshot()
+            services = truth.get("servicesById", {}) or {}
+            lines = [f"Factory: {truth.get('verdict', 'UNKNOWN')}"]
+            for service_id, label in [
+                ("chat_proxy", "Proxy"),
+                ("litellm", "LiteLLM"),
+                ("frontier", "Ada"),
+                ("decode_6900xt", "6900XT"),
+                ("judge_235b", "Judge"),
+            ]:
+                svc = services.get(service_id, {}) if isinstance(services, dict) else {}
+                if not svc:
+                    continue
+                lines.append(
+                    f"{label}: {'OK' if svc.get('ready') else 'FAIL'} "
+                    f":{svc.get('port', '?')} {svc.get('status', 'unknown')}"
+                )
+            if "judge" in model.lower() or "cpu" in model.lower():
+                lines.append("Judge mode: Direct Reviewer for route doctor; chat send may be slow.")
+            return lines
+        except Exception as exc:
+            return [f"Factory diagnostics unavailable: {exc}"]
+
     def _cancel_status_timeouts(self):
         for handle in self._timeout_handles:
             GLib.source_remove(handle)
@@ -905,6 +933,7 @@ class ChatService:
                         f"Endpoint: POST {host}/v1/chat/completions",
                         f"Error: {err_msg}",
                     ]
+                    lines.extend(self._factory_route_diagnostics(model))
                     if detail:
                         lines.append(f"Detail: {str(detail)[:300]}")
                     lines.append("Action: Retry or switch lane")
@@ -915,6 +944,7 @@ class ChatService:
                         f"Route: {model}",
                         f"Endpoint: POST {host}/v1/chat/completions",
                     ]
+                    lines.extend(self._factory_route_diagnostics(model))
                     if detail:
                         lines.append(f"Detail: {str(detail)[:300]}")
                     self._handle_error("\n".join(lines))

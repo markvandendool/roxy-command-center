@@ -21,6 +21,7 @@ from datetime import datetime
 
 # Import all components
 from daemon_client import DaemonClient, normalize_status
+from services.factory_truth_service import get_factory_truth_service
 from ui.header_bar import HeaderBar
 from ui.navigation import MainNavigation
 from ui.settings import SettingsPage
@@ -662,6 +663,16 @@ class MainWindow(Adw.ApplicationWindow):
             if raw_data:
                 # Normalize to canonical schema
                 data = normalize_status(raw_data)
+                try:
+                    data["factoryTruth"] = get_factory_truth_service().snapshot()
+                except Exception as exc:
+                    data["factoryTruth"] = {
+                        "verdict": "UNKNOWN",
+                        "ready": {},
+                        "servicesById": {},
+                        "warnings": [f"factory.status unavailable: {exc}"],
+                        "errors": [],
+                    }
                 self._current_data = data
                 
                 # Accumulate telemetry history for sparklines

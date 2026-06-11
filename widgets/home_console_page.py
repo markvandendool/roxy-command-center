@@ -616,9 +616,9 @@ class ChatMessage_Widget(Gtk.Box):
                 revealer = Gtk.Revealer()
                 revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
                 revealer.set_transition_duration(200)
-                revealer.set_reveal_child(True)
-                expand_btn.set_label("🔼")
-                expand_btn.set_tooltip_text("Collapse Context Inspector details")
+                revealer.set_reveal_child(False)
+                expand_btn.set_label("🔍")
+                expand_btn.set_tooltip_text("Expand Context Inspector details")
                 evidence_frame.append(revealer)
                 
                 detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -812,6 +812,7 @@ class TalkColumn(Gtk.Box):
         # Operator controls (Chief's Truth Panel)
         self._routing_mode = "AUTO"  # CHAT, RAG, EXEC, AUTO
         self._pool_mode = "AUTO"  # AUTO, ROXY
+        self._last_factory_truth: Dict[str, Any] = {}
         
         # Services
         print("[TalkColumn] Getting services...")
@@ -1083,6 +1084,33 @@ class TalkColumn(Gtk.Box):
         input_area.set_margin_end(12)
         input_area.set_margin_bottom(12)
         self.append(input_area)
+
+        # Factory truth strip: one compact source of route/status truth above input.
+        factory_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        factory_row.add_css_class("linked")
+        input_area.append(factory_row)
+
+        self._factory_badge = Gtk.Button(label="Factory: --")
+        self._factory_badge.add_css_class("flat")
+        self._factory_badge.add_css_class("caption")
+        self._factory_badge.set_tooltip_text("Source: rcc factory.status")
+        self._factory_badge.connect("clicked", self._on_factory_badge_clicked)
+        factory_row.append(self._factory_badge)
+
+        self._route_truth_chips: Dict[str, Gtk.Label] = {}
+        for key, label_text in [
+            ("chat_proxy", "Proxy"),
+            ("litellm", "LiteLLM"),
+            ("frontier", "Ada"),
+            ("decode_6900xt", "6900XT"),
+            ("judge_235b", "Judge"),
+        ]:
+            chip = Gtk.Label(label=f"{label_text}: --")
+            chip.add_css_class("caption")
+            chip.add_css_class("dim-label")
+            chip.set_tooltip_text(f"{label_text}: waiting for rcc factory.status")
+            factory_row.append(chip)
+            self._route_truth_chips[key] = chip
         
         # Mode toggle row
         mode_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1681,6 +1709,9 @@ class TalkColumn(Gtk.Box):
     def _update_lane_health_display(self):
         """Poll and display lane health from canonical apex-status.json."""
         try:
+            if self._last_factory_truth:
+                self._update_factory_truth_display(self._last_factory_truth)
+                return
             health = self._chat_service.get_lane_health()
             for lane_key, chip in self._lane_health_chips.items():
                 info = health.get(lane_key)
@@ -1713,6 +1744,87 @@ class TalkColumn(Gtk.Box):
                     chip.set_tooltip_text(f"{name} lane: unhealthy")
         except Exception as exc:
             print(f"[Talk] Lane health update failed: {exc}")
+
+    def update(self, data: dict):
+        """Update the Chat cockpit from daemon + factory truth snapshots."""
+        factory_truth = data.get("factoryTruth") or {}
+        if factory_truth:
+            self._last_factory_truth = factory_truth
+            self._update_factory_truth_display(factory_truth)
+
+    def _on_factory_badge_clicked(self, _button):
+        truth = self._last_factory_truth or {}
+        verdict = truth.get("verdict", "UNKNOWN")
+        receipt = truth.get("receiptPath") or "no receipt"
+        warnings = truth.get("warnings") or []
+        errors = truth.get("errors") or []
+        lines = [f"Factory: {verdict}", f"Receipt: {receipt}"]
+        if errors:
+            lines.append("Errors: " + "; ".join(errors[:3]))
+        if warnings:
+            lines.append("Warnings: " + "; ".join(warnings[:3]))
+        self._append_system_message("\n".join(lines))
+
+    def _update_factory_truth_display(self, truth: Dict[str, Any]):
+        verdict = truth.get("verdict", "UNKNOWN")
+        ready = truth.get("ready") or {}
+        services = truth.get("servicesById") or {}
+        receipt = truth.get("receiptPath") or ""
+
+        if hasattr(self, "_factory_badge") and self._factory_badge:
+            icon = "✅" if verdict == "PASS" else "⚠️" if verdict == "DEGRADED" else "❌"
+            self._factory_badge.set_label(f"{icon} Factory {verdict}")
+            self._factory_badge.set_tooltip_text(
+                f"Source: rcc factory.status\nReceipt: {receipt or 'not written'}"
+            )
+
+        for key, chip in getattr(self, "_route_truth_chips", {}).items():
+            svc = services.get(key, {}) if isinstance(services, dict) else {}
+            label = {
+                "chat_proxy": "Proxy",
+                "litellm": "LiteLLM",
+                "frontier": "Ada",
+                "decode_6900xt": "6900XT",
+                "judge_235b": "Judge",
+            }.get(key, key)
+            is_ready = bool(svc.get("ready")) or bool(ready.get({
+                "chat_proxy": "chatProxy",
+                "litellm": "litellm",
+                "frontier": "qwenMtp",
+                "decode_6900xt": "decode6900xt",
+                "judge_235b": "judge",
+            }.get(key, key)))
+            port = svc.get("port", "")
+            status = svc.get("status", "unknown")
+            chip.set_label(f"{label}: {'OK' if is_ready else 'FAIL'}")
+            chip.set_tooltip_text(
+                f"{label}\nSource: rcc factory.status\nPort: {port or 'unknown'}\nStatus: {status}"
+            )
+
+        # Keep legacy lane chips aligned with the same factory truth.
+        lane_map = {
+            "frontier": ("Ada", "frontier", "qwenMtp"),
+            "judge": ("Judge", "judge_235b", "judge"),
+            "local": ("Ollama", None, None),
+            "cloud": ("Cloud", None, None),
+        }
+        for lane_key, chip in self._lane_health_chips.items():
+            name, service_id, ready_key = lane_map.get(lane_key, (lane_key, None, None))
+            if service_id:
+                svc = services.get(service_id, {}) if isinstance(services, dict) else {}
+                ok = bool(svc.get("ready")) or bool(ready.get(ready_key))
+                chip.set_label(f"{name}: {'🟢' if ok else '🔴'}")
+                chip.set_tooltip_text(
+                    f"{name} lane from rcc factory.status\n"
+                    f"Port: {svc.get('port', 'unknown')}\nStatus: {svc.get('status', 'unknown')}"
+                )
+            elif lane_key == "local":
+                chip.set_label("Ollama: ⚪ optional")
+                chip.set_tooltip_text("Optional local utility lane; not required for Factory PASS")
+            elif lane_key == "cloud":
+                has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+                chip.set_label("Cloud: ☁️" if has_key else "Cloud: 🔒 No key")
+                chip.set_tooltip_text("Cloud/API fallback; requires ANTHROPIC_API_KEY")
     
     def _start_lane_health_polling(self):
         """Start periodic lane health updates every 30s."""
@@ -1893,27 +2005,16 @@ class TalkColumn(Gtk.Box):
 
 
 class ExecutionRunCard(Gtk.Box):
-    """A card showing an execution run."""
+    """Compact operational row for an execution run."""
     
     def __init__(self, run: ExecutionRun):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.run = run
-        self.add_css_class("card")
+        self.add_css_class("progression-row")
         self.set_margin_start(12)
         self.set_margin_end(12)
-        self.set_margin_bottom(8)
-        
-        # Main content
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        content.set_margin_top(12)
-        content.set_margin_bottom(12)
-        content.set_margin_start(12)
-        content.set_margin_end(12)
-        self.append(content)
-        
-        # Title row
-        title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        content.append(title_row)
+        self.set_margin_bottom(4)
+        self.set_margin_top(2)
         
         # Status icon
         status_icons = {
@@ -1931,54 +2032,73 @@ class ExecutionRunCard(Gtk.Box):
             icon.add_css_class("error")
         elif run.status == RunStatus.RUNNING:
             icon.add_css_class("accent")
-        title_row.append(icon)
+        self.append(icon)
         
         # Name
         name_label = Gtk.Label(label=run.name)
         name_label.set_xalign(0)
         name_label.set_hexpand(True)
         name_label.set_ellipsize(Pango.EllipsizeMode.END)
-        title_row.append(name_label)
+        name_label.add_css_class("caption")
+        self.append(name_label)
         
-        # Progress bar (if running)
-        if run.status == RunStatus.RUNNING and run.progress_pct is not None:
-            progress = Gtk.ProgressBar()
-            progress.set_fraction(run.progress_pct / 100.0)
-            progress.set_text(f"{run.progress_pct}%")
-            progress.set_show_text(True)
-            content.append(progress)
-        
-        # Status text
-        status_text = run.status.value.upper()
-        if run.status == RunStatus.FAILED:
-            status_text = "⚠ FAILED"
+        pct = run.progress_pct if run.progress_pct is not None else 0
+        pct_label = Gtk.Label(label=f"{pct}%")
+        pct_label.add_css_class("caption")
+        pct_label.add_css_class("monospace")
+        pct_label.set_width_chars(4)
+        self.append(pct_label)
+
+        age_label = Gtk.Label(label=self._format_age(run.started_at))
+        age_label.add_css_class("caption")
+        age_label.add_css_class("dim-label")
+        age_label.set_width_chars(7)
+        self.append(age_label)
+
+        status_text = "FAILED" if run.status == RunStatus.FAILED else run.status.value.upper()
         status_label = Gtk.Label(label=status_text)
         status_label.add_css_class("caption")
         status_label.add_css_class("dim-label")
-        status_label.set_xalign(0)
-        content.append(status_label)
-        
-        # Action buttons
-        actions_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions_row.set_margin_top(4)
-        content.append(actions_row)
+        status_label.set_width_chars(9)
+        self.append(status_label)
         
         if run.status == RunStatus.QUEUED:
-            run_btn = Gtk.Button(label="▶ Run")
+            run_btn = Gtk.Button(label="▶")
             run_btn.add_css_class("suggested-action")
+            run_btn.set_tooltip_text("Run")
             run_btn.connect("clicked", self._on_dispatch)
-            actions_row.append(run_btn)
+            self.append(run_btn)
         
         if run.status == RunStatus.RUNNING and run.can_cancel:
-            cancel_btn = Gtk.Button(label="⏹ Cancel")
+            cancel_btn = Gtk.Button(label="■")
             cancel_btn.add_css_class("destructive-action")
+            cancel_btn.set_tooltip_text("Cancel")
             cancel_btn.connect("clicked", self._on_cancel)
-            actions_row.append(cancel_btn)
+            self.append(cancel_btn)
         
-        logs_btn = Gtk.Button(label="📋 Logs")
+        logs_btn = Gtk.Button(label="Logs")
         logs_btn.add_css_class("flat")
+        logs_btn.add_css_class("caption")
         logs_btn.connect("clicked", self._on_logs)
-        actions_row.append(logs_btn)
+        self.append(logs_btn)
+
+    def _format_age(self, started_at) -> str:
+        if not started_at:
+            return "--"
+        try:
+            if isinstance(started_at, str):
+                started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            else:
+                started = started_at
+            now = datetime.now(started.tzinfo) if started.tzinfo else datetime.now()
+            seconds = max(0, int((now - started).total_seconds()))
+            if seconds < 60:
+                return f"{seconds}s"
+            if seconds < 3600:
+                return f"{seconds // 60}m"
+            return f"{seconds // 3600}h"
+        except Exception:
+            return "--"
     
     def _on_dispatch(self, button):
         """Dispatch run - TODO: call POST /api/runs/:id/dispatch."""
@@ -2094,8 +2214,16 @@ class ExecuteColumn(Gtk.Box):
             else:
                 break
         
-        # Add runs
-        for run in self._runs:
+        order = {
+            RunStatus.FAILED: 0,
+            RunStatus.RUNNING: 1,
+            RunStatus.QUEUED: 2,
+            RunStatus.CANCELLED: 3,
+            RunStatus.COMPLETED: 4,
+        }
+
+        # Add runs, with blockers/running first and completed rows collapsed low.
+        for run in sorted(self._runs, key=lambda r: (order.get(r.status, 9), r.name.lower())):
             card = ExecutionRunCard(run)
             self.runs_box.append(card)
 
