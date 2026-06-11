@@ -118,6 +118,8 @@ class ChatMessage:
     orico_counts: Dict[str, Any] = None
     degraded_reasons: List[str] = None
     harness_bypassed: bool = False
+    # Structured data for error cards / evidence cards
+    structured_data: Dict[str, Any] = None
 
     def __post_init__(self):
         if self.memory_refs is None:
@@ -134,6 +136,8 @@ class ChatMessage:
             self.orico_counts = {}
         if self.degraded_reasons is None:
             self.degraded_reasons = []
+        if self.structured_data is None:
+            self.structured_data = {}
 
 
 # =============================================================================
@@ -441,13 +445,16 @@ class ChatMessage_Widget(Gtk.Box):
         
         if message.role == "system":
             self.add_css_class("system-message")
-            label = Gtk.Label(label=message.content)
-            label.add_css_class("dim-label")
-            label.add_css_class("caption")
-            label.set_wrap(True)
-            label.set_xalign(0.5)
-            label.set_selectable(True)  # Enable text selection
-            self.append(label)
+            if message.structured_data.get("card_type") == "error":
+                self._build_error_card(message)
+            else:
+                label = Gtk.Label(label=message.content)
+                label.add_css_class("dim-label")
+                label.add_css_class("caption")
+                label.set_wrap(True)
+                label.set_xalign(0.5)
+                label.set_selectable(True)  # Enable text selection
+                self.append(label)
         else:
             is_user = message.role == "user"
             
@@ -795,6 +802,101 @@ class ChatMessage_Widget(Gtk.Box):
                     lambda gesture, n_press, x, y: _on_evidence_toggle(expand_btn, revealer),
                 )
                 toggle_row.add_controller(row_click)
+
+    def _build_error_card(self, message: ChatMessage):
+        """Render a structured error card for operator-trustworthy chat errors."""
+        data = message.structured_data or {}
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        card.set_margin_top(8)
+        card.set_margin_bottom(8)
+        card.set_margin_start(24)
+        card.set_margin_end(24)
+        card.add_css_class("frame")
+        card.add_css_class("error-card")
+        self.append(card)
+
+        # Header row: icon + title + subtitle
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        card.append(header)
+
+        icon = Gtk.Label(label=data.get("icon", "❌"))
+        header.append(icon)
+
+        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        title_box.set_hexpand(True)
+        header.append(title_box)
+
+        title = Gtk.Label(label=data.get("title", "Error"))
+        title.add_css_class("heading")
+        title.set_xalign(0)
+        title_box.append(title)
+
+        if data.get("subtitle"):
+            subtitle = Gtk.Label(label=data["subtitle"])
+            subtitle.add_css_class("caption")
+            subtitle.add_css_class("dim-label")
+            subtitle.set_xalign(0)
+            subtitle.set_wrap(True)
+            title_box.append(subtitle)
+
+        # Detail rows
+        for key, value in data.get("details", {}).items():
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            row.set_margin_start(8)
+            key_lbl = Gtk.Label(label=f"{key}:")
+            key_lbl.add_css_class("caption")
+            key_lbl.add_css_class("dim-label")
+            key_lbl.set_xalign(0)
+            row.append(key_lbl)
+            val_lbl = Gtk.Label(label=str(value))
+            val_lbl.add_css_class("caption")
+            val_lbl.set_xalign(0)
+            val_lbl.set_wrap(True)
+            val_lbl.set_selectable(True)
+            row.append(val_lbl)
+            card.append(row)
+
+        # Diagnostics block
+        diagnostics = data.get("diagnostics") or []
+        if diagnostics:
+            diag_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            diag_frame.set_margin_start(8)
+            diag_frame.set_margin_top(4)
+            diag_frame.add_css_class("linked")
+            card.append(diag_frame)
+            diag_title = Gtk.Label(label="Factory diagnostics")
+            diag_title.add_css_class("caption")
+            diag_title.add_css_class("dim-label")
+            diag_title.set_xalign(0)
+            diag_frame.append(diag_title)
+            for line in diagnostics[:6]:
+                line_lbl = Gtk.Label(label=str(line))
+                line_lbl.add_css_class("caption")
+                line_lbl.set_xalign(0)
+                line_lbl.set_wrap(True)
+                line_lbl.set_selectable(True)
+                diag_frame.append(line_lbl)
+            if len(diagnostics) > 6:
+                more = Gtk.Label(label=f"… and {len(diagnostics) - 6} more lines")
+                more.add_css_class("caption")
+                more.add_css_class("dim-label")
+                more.set_xalign(0)
+                diag_frame.append(more)
+
+        # Action buttons
+        actions = data.get("actions") or []
+        if actions:
+            actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            actions_box.set_margin_top(6)
+            actions_box.set_margin_start(8)
+            actions_box.set_halign(Gtk.Align.START)
+            card.append(actions_box)
+            for action in actions:
+                btn = Gtk.Button(label=action)
+                btn.add_css_class("suggested-action")
+                btn.add_css_class("pill")
+                btn.add_css_class("caption")
+                actions_box.append(btn)
 
 
 class TalkColumn(Gtk.Box):
@@ -1276,6 +1378,17 @@ class TalkColumn(Gtk.Box):
 
         input_row.append(self.entry)
 
+        # Phase 5: Send preflight warning label
+        self._send_preflight_label = Gtk.Label(label="")
+        self._send_preflight_label.add_css_class("caption")
+        self._send_preflight_label.add_css_class("error")
+        self._send_preflight_label.set_xalign(0)
+        self._send_preflight_label.set_margin_start(8)
+        self._send_preflight_label.set_margin_top(4)
+        self._send_preflight_label.set_wrap(True)
+        self._send_preflight_label.set_visible(False)
+        input_area.append(self._send_preflight_label)
+
         # Make the chat surface immediately usable without hunting for the entry.
         GLib.idle_add(self._focus_chat_entry)
 
@@ -1504,6 +1617,7 @@ class TalkColumn(Gtk.Box):
             orico_counts=getattr(message, 'orico_counts', {}),
             degraded_reasons=getattr(message, 'degraded_reasons', []),
             harness_bypassed=getattr(message, 'harness_bypassed', False),
+            structured_data=getattr(message, 'structured_data', {}),
         )
         widget = ChatMessage_Widget(ui_message)
         self.chat_box.append(widget)
@@ -1670,6 +1784,7 @@ class TalkColumn(Gtk.Box):
         if self._current_lane_label:
             self._current_lane_label.set_label(f"Using: {name}")
         print(f"[Talk] Lane: {lane} → {self._chat_service.selected_lane}")
+        self._update_send_preflight()
         self._save_settings()
 
         # Credential-blocked warning for Cloud
@@ -1755,6 +1870,47 @@ class TalkColumn(Gtk.Box):
                     provenance,
                     detail=detail,
                 )
+
+        self._update_send_preflight()
+
+    def _update_send_preflight(self):
+        """Enable/disable Send based on selected lane + factory truth."""
+        lanes = ["auto", "frontier", "judge", "local", "cloud"]
+        idx = self._lane_dropdown.get_selected()
+        lane = lanes[idx] if idx < len(lanes) else "auto"
+
+        truth = getattr(self, "_last_factory_truth", {}) or {}
+        services = truth.get("servicesById") or {} if isinstance(truth, dict) else {}
+
+        blocked_reason = None
+        if lane == "local":
+            blocked_reason = "Local/Ollama lane is disabled by design"
+        elif lane == "frontier":
+            if not bool(services.get("frontier", {}).get("ready")):
+                blocked_reason = "Frontier (Ada) route is not ready"
+        elif lane == "judge":
+            if not bool(services.get("judge_235b", {}).get("ready")):
+                blocked_reason = "Judge route is not ready"
+        elif lane == "cloud":
+            if not bool(services.get("litellm", {}).get("ready")):
+                blocked_reason = "LiteLLM/Cloud route is not ready"
+            elif not os.environ.get("ANTHROPIC_API_KEY"):
+                blocked_reason = "Cloud lane requires ANTHROPIC_API_KEY"
+        elif lane == "auto":
+            auto_ready = bool(services.get("frontier", {}).get("ready")) or \
+                         bool(services.get("judge_235b", {}).get("ready"))
+            if not auto_ready:
+                blocked_reason = "No auto route is ready (Frontier/Judge both down)"
+
+        if blocked_reason:
+            self._send_action_btn.set_sensitive(False)
+            self._send_preflight_label.set_label(f"🚫 Send disabled: {blocked_reason}")
+            self._send_preflight_label.set_visible(True)
+            self.entry.set_placeholder_text("Select a ready lane to send…")
+        else:
+            self._send_action_btn.set_sensitive(True)
+            self._send_preflight_label.set_visible(False)
+            self.entry.set_placeholder_text("Talk to Roxy...")
 
     def _on_ask_judge(self, button, text: str):
         """Send current message/plan to Judge lane for adversarial review."""

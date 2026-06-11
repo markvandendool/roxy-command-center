@@ -110,6 +110,8 @@ class ChatMessage:
     orico_counts: Dict[str, Any] = field(default_factory=dict)
     degraded_reasons: List[str] = field(default_factory=list)
     harness_bypassed: bool = False
+    # Structured data for error cards / evidence cards
+    structured_data: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -927,27 +929,46 @@ class ChatService:
                     )
                 elif "fetch failed" in str(err_msg).lower():
                     # Transient network failure — give operator full context
-                    lines = [
-                        "❌ Send failed — route could not reach backend",
-                        f"Route: {model}",
-                        f"Endpoint: POST {host}/v1/chat/completions",
-                        f"Error: {err_msg}",
-                    ]
-                    lines.extend(self._factory_route_diagnostics(model))
+                    diagnostics = self._factory_route_diagnostics(model)
+                    structured_error = {
+                        "card_type": "error",
+                        "icon": "❌",
+                        "title": "Send failed",
+                        "subtitle": "Route could not reach backend",
+                        "details": {
+                            "Route": model,
+                            "Endpoint": f"POST {host}/v1/chat/completions",
+                            "Error": err_msg,
+                        },
+                        "diagnostics": diagnostics,
+                        "actions": ["Retry", "Switch lane"],
+                    }
                     if detail:
-                        lines.append(f"Detail: {str(detail)[:300]}")
-                    lines.append("Action: Retry or switch lane")
-                    self._handle_error("\n".join(lines))
+                        structured_error["details"]["Detail"] = str(detail)[:300]
+                    self._handle_error(
+                        "Send failed — route could not reach backend",
+                        structured_data=structured_error,
+                    )
                 else:
-                    lines = [
-                        f"❌ Harness error: {err_msg}",
-                        f"Route: {model}",
-                        f"Endpoint: POST {host}/v1/chat/completions",
-                    ]
-                    lines.extend(self._factory_route_diagnostics(model))
+                    diagnostics = self._factory_route_diagnostics(model)
+                    structured_error = {
+                        "card_type": "error",
+                        "icon": "❌",
+                        "title": "Harness error",
+                        "subtitle": str(err_msg),
+                        "details": {
+                            "Route": model,
+                            "Endpoint": f"POST {host}/v1/chat/completions",
+                        },
+                        "diagnostics": diagnostics,
+                        "actions": ["Retry", "Switch lane"],
+                    }
                     if detail:
-                        lines.append(f"Detail: {str(detail)[:300]}")
-                    self._handle_error("\n".join(lines))
+                        structured_error["details"]["Detail"] = str(detail)[:300]
+                    self._handle_error(
+                        f"Harness error: {err_msg}",
+                        structured_data=structured_error,
+                    )
                 return
 
             # Extract assistant content (OpenAI format)
@@ -1140,7 +1161,7 @@ class ChatService:
         # Phase 4: Auto-save after every assistant response
         self.save_session()
 
-    def _handle_error(self, error: str):
+    def _handle_error(self, error: str, structured_data: Dict[str, Any] = None):
         """Handle error response."""
         self._cancel_status_timeouts()
         self._pending_request_active = False
@@ -1148,10 +1169,10 @@ class ChatService:
         if self._on_typing:
             self._on_typing(False)
         self._set_status(ConnectionStatus.ERROR, error)
-        if error == self._last_error_message:
+        if error == self._last_error_message and not structured_data:
             return
         self._last_error_message = error
-        
+
         # Phase 6: Auto-reconnect on connection errors
         error_lower = error.lower()
         is_connection_error = any(k in error_lower for k in [
@@ -1161,13 +1182,14 @@ class ChatService:
         if is_connection_error:
             print(f"[ChatService] Connection error detected, triggering health check...")
             GLib.timeout_add_seconds(2, lambda: self._ping_harness() or False)
-        
+
         if self._on_message:
             error_msg = ChatMessage(
                 id=str(uuid.uuid4()),
                 role="system",
                 content=f"⚠️ {error}",
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
+                structured_data=structured_data or {},
             )
             self._on_message(error_msg)
 
