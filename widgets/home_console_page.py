@@ -1505,7 +1505,8 @@ class TalkColumn(Gtk.Box):
             judge_info = health.get("judge", {})
             # Judge is usable if status is healthy (even if slow)
             judge_alive = judge_info.get("status") == "healthy" or judge_info.get("truthGrade") == "live_probe"
-            judge_slow = judge_info.get("tps", 100) < 10  # Under 10 t/s = slow
+            judge_tps = judge_info.get("tps")
+            judge_slow = judge_tps is not None and judge_tps < 10  # Under 10 t/s = slow
 
             # If this response came from Judge, label it
             model_used = getattr(message, 'model', '') or ''
