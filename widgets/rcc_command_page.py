@@ -27,6 +27,7 @@ import json
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from services.rcc_adapter import RCCAdapter, RCCCommandMeta, RCCRunResult
+from widgets.truth_badge import TruthBadge
 
 
 # ── Tier Badge Styles ───────────────────────────────────────────────
@@ -262,6 +263,26 @@ class RCCCommandPage(Gtk.ScrolledWindow):
         self.factory_status.set_xalign(0)
         main_box.append(self.factory_status)
 
+        # ── Route Doctor section (Story 7) ───────────────────────────────
+        route_doctor_title = Gtk.Label(label="Route Doctor")
+        route_doctor_title.add_css_class("title-3")
+        route_doctor_title.set_xalign(0)
+        route_doctor_title.set_margin_top(16)
+        main_box.append(route_doctor_title)
+
+        route_doctor_subtitle = Gtk.Label(
+            label="OpenCode route probes: Frontier, 6900XT, Judge Direct, Judge OpenCode."
+        )
+        route_doctor_subtitle.add_css_class("caption")
+        route_doctor_subtitle.set_xalign(0)
+        route_doctor_subtitle.set_wrap(True)
+        main_box.append(route_doctor_subtitle)
+
+        self.route_doctor_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.route_doctor_box.set_margin_top(8)
+        self.route_doctor_box.set_margin_bottom(8)
+        main_box.append(self.route_doctor_box)
+
         # Commands list
         self.commands_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         main_box.append(self.commands_box)
@@ -316,9 +337,10 @@ class RCCCommandPage(Gtk.ScrolledWindow):
             self.commands_box.append(row)
             self._rows[meta.id] = row
 
-        # Also load receipts
+        # Also load receipts and route doctor
         self._load_receipts()
         self._refresh_factory_status()
+        self._refresh_route_doctor()
 
     def _build_quick_commands(self, commands: list[RCCCommandMeta]):
         """Build pinned DARK FACTORY command buttons."""
@@ -333,6 +355,120 @@ class RCCCommandPage(Gtk.ScrolledWindow):
             btn.set_tooltip_text(by_id[command_id].label)
             btn.connect("clicked", lambda _btn, cid=command_id: self._on_command_run(cid, False))
             self.quick_box.append(btn)
+
+    def _refresh_route_doctor(self):
+        """Run factory.routes in the background and render route doctor rows."""
+        import threading
+
+        def worker():
+            result = self.adapter.run("factory.routes", receipt=True)
+            GLib.idle_add(self._show_route_doctor, result)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_route_doctor(self, result: RCCRunResult):
+        """Render route doctor rows from factory.routes result."""
+        while self.route_doctor_box.get_first_child():
+            self.route_doctor_box.remove(self.route_doctor_box.get_first_child())
+
+        if not result.ok:
+            err = Gtk.Label(label=f"❌ factory.routes failed: {result.errors or result.verdict}")
+            err.add_css_class("error")
+            err.set_xalign(0)
+            err.set_wrap(True)
+            self.route_doctor_box.append(err)
+            return False
+
+        data = result.data or {}
+        routes = data.get("routes") or []
+        if not routes:
+            empty = Gtk.Label(label="No routes reported by factory.routes.")
+            empty.add_css_class("dim-label")
+            self.route_doctor_box.append(empty)
+            return False
+
+        for route in routes:
+            if not isinstance(route, dict):
+                continue
+            row = self._build_route_doctor_row(route, result.receipt_path)
+            self.route_doctor_box.append(row)
+
+        return False
+
+    def _build_route_doctor_row(self, route: dict, command_receipt_path: Optional[str]) -> Gtk.Box:
+        """Build one route doctor row."""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.set_margin_top(4)
+        row.set_margin_bottom(4)
+
+        # Route name
+        name = Gtk.Label(label=route.get("label") or route.get("id", "unknown"))
+        name.add_css_class("caption")
+        name.add_css_class("monospace")
+        name.set_xalign(0)
+        name.set_size_request(180, -1)
+        row.append(name)
+
+        # Status badge
+        status = route.get("status", "UNPROVEN")
+        provenance = {
+            "source": "rcc factory.routes",
+            "command": "factory.routes",
+            "timestamp": route.get("finishedAt") or route.get("startedAt"),
+            "receiptPath": command_receipt_path,
+        }
+        badge = TruthBadge(status, status, provenance=provenance)
+        row.append(badge)
+
+        # Last result time
+        finished = route.get("finishedAt", "--")
+        finished_lbl = Gtk.Label(label=str(finished))
+        finished_lbl.add_css_class("caption")
+        finished_lbl.add_css_class("dim-label")
+        finished_lbl.set_xalign(0)
+        finished_lbl.set_size_request(160, -1)
+        row.append(finished_lbl)
+
+        # Duration
+        duration_ms = route.get("durationMs", 0)
+        duration_lbl = Gtk.Label(label=f"{duration_ms}ms")
+        duration_lbl.add_css_class("caption")
+        duration_lbl.add_css_class("dim-label")
+        duration_lbl.set_xalign(0)
+        duration_lbl.set_size_request(70, -1)
+        row.append(duration_lbl)
+
+        # Error
+        error = route.get("stderr") or route.get("reason") or ""
+        if error:
+            error_lbl = Gtk.Label(label=str(error)[:60])
+            error_lbl.add_css_class("caption")
+            error_lbl.add_css_class("error")
+            error_lbl.set_xalign(0)
+            error_lbl.set_wrap(True)
+            error_lbl.set_tooltip_text(str(error))
+            error_lbl.set_hexpand(True)
+            row.append(error_lbl)
+        else:
+            spacer = Gtk.Box()
+            spacer.set_hexpand(True)
+            row.append(spacer)
+
+        # Run button
+        run_btn = Gtk.Button(label="Run")
+        run_btn.set_tooltip_text(f"Re-run route probe for {route.get('id')}")
+        run_btn.connect("clicked", lambda _b: self._on_command_run("factory.routes", False))
+        row.append(run_btn)
+
+        # Receipt button (if route has its own receipt or command receipt)
+        receipt_path = route.get("receiptPath") or command_receipt_path
+        if receipt_path:
+            rec_btn = Gtk.Button.new_from_icon_name("document-open-symbolic")
+            rec_btn.set_tooltip_text(str(receipt_path))
+            rec_btn.connect("clicked", lambda _b, p=receipt_path: print(f"[RCC] Open receipt: {p}"))
+            row.append(rec_btn)
+
+        return row
 
     def _refresh_factory_status(self):
         """Run factory.status in the background and summarize readiness."""
@@ -376,8 +512,10 @@ class RCCCommandPage(Gtk.ScrolledWindow):
         elif command_id.startswith("factory."):
             self._show_factory_status(result)
 
-        # Refresh receipts
+        # Refresh receipts and route doctor
         self._load_receipts()
+        if command_id == "factory.routes":
+            self._refresh_route_doctor()
         return False  # GLib.idle_add callback
 
     def _load_receipts(self):
