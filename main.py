@@ -22,6 +22,7 @@ from datetime import datetime
 # Import all components
 from daemon_client import DaemonClient, normalize_status
 from services.factory_truth_service import get_factory_truth_service
+from services.roxy_status_provider import proof_browser_status
 from ui.header_bar import HeaderBar
 from ui.navigation import MainNavigation
 from ui.settings import SettingsPage
@@ -683,6 +684,14 @@ class MainWindow(Adw.ApplicationWindow):
                         "routesById": {},
                         "warnings": [f"factory.routes unavailable: {exc}"],
                         "errors": [],
+                    }
+                try:
+                    data["proofBrowser"] = proof_browser_status()
+                except Exception as exc:
+                    data["proofBrowser"] = {
+                        "ok": False,
+                        "error": str(exc),
+                        "note": "HELPER_ONLY_NOT_FINAL_TRUTH",
                     }
                 self._current_data = data
                 

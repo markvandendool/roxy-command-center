@@ -235,6 +235,9 @@ class PerformancePage(Gtk.Box):
         self._add_device("agents", "Agents", "applications-games-symbolic", (0.96, 0.62, 0.04))
         self._add_device("mcp", "MCP", "preferences-system-symbolic", (0.48, 0.23, 0.93))
 
+        self._add_section("Proof")
+        self._add_device("proof_browser", "Browser", "web-browser-symbolic", (0.21, 0.82, 0.50))
+
         # ── CENTER+RIGHT: Detail view ──
         self._detail = DeviceDetailView()
         self._detail.set_hexpand(True)
@@ -487,4 +490,23 @@ class PerformancePage(Gtk.Box):
             if self._selected_device == "mcp":
                 self._detail.update_facts({
                     "Total": str(mcp_total),
+                })
+
+        # ── Proof Browser (helper-only CDP read) ──
+        browser = data.get("proofBrowser") or {}
+        if "proof_browser" in self._devices:
+            ok = browser.get("ok", False)
+            target_count = browser.get("target_count", 0)
+            teacher_tabs = browser.get("teacher_studio_tabs", 0)
+            status = "healthy" if ok and target_count > 0 else "warn" if ok else "blocked"
+            self._devices["proof_browser"].set_value(str(target_count), status)
+            if self._selected_device == "proof_browser":
+                self._detail.update_facts({
+                    "CDP port": str(browser.get("port", "?")),
+                    "Targets": str(target_count),
+                    "Pages": str(browser.get("page_count", 0)),
+                    "Current URL": browser.get("current_url", "")[:60],
+                    "Current title": browser.get("current_title", "")[:40],
+                    "Teacher-studio tabs": str(teacher_tabs),
+                    "Note": browser.get("note", ""),
                 })

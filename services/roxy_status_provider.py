@@ -167,6 +167,39 @@ def _http_json(url: str, timeout: int = 2) -> dict[str, Any]:
     }
 
 
+def proof_browser_status() -> dict[str, Any]:
+    """Helper-only CDP probe of Testing Bay formal-CDP port (9460).
+
+    Returns target count, current visible page(s), and teacher-studio tab count.
+    This is a helper reading; final browser truth still requires live CDP.
+    """
+    cdp_url = "http://127.0.0.1:9460/json/list"
+    result = _http_json(cdp_url, timeout=3)
+    targets = result.get("data") or []
+    if not isinstance(targets, list):
+        targets = []
+
+    pages = [t for t in targets if t.get("type") == "page"]
+    current_url = pages[0].get("url", "") if pages else ""
+    current_title = pages[0].get("title", "") if pages else ""
+    teacher_studio_tabs = [
+        t for t in pages
+        if "teacher-studio" in (t.get("url", "") + t.get("title", "")).lower()
+    ]
+
+    return {
+        "ok": result.get("ok", False) and len(targets) > 0,
+        "port": 9460,
+        "target_count": len(targets),
+        "page_count": len(pages),
+        "current_url": current_url,
+        "current_title": current_title,
+        "teacher_studio_tabs": len(teacher_studio_tabs),
+        "error": result.get("error", ""),
+        "note": "HELPER_ONLY_NOT_FINAL_TRUTH",
+    }
+
+
 def mos_control_plane_status() -> dict[str, Any]:
     latest_boot = _latest_file_under(
         MOS_ROOT / ".autonomous/test-evidence/hardware-control",
