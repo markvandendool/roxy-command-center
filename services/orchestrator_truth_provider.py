@@ -77,6 +77,9 @@ class OrchestratorTruthProvider:
                 "started_at": _parse_iso(started) if started else None,
                 "progress_pct": item.get("progress_pct"),
                 "can_cancel": item.get("can_cancel", False),
+                "owner": item.get("owner", ""),
+                "source": item.get("source", ""),
+                "receipt_path": item.get("receipt_path", ""),
             })
         return runs
 

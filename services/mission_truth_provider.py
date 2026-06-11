@@ -475,6 +475,8 @@ class MissionTruthProvider:
             total = len(milestones)
             pct = int((done / total) * 100) if total > 0 else None
 
+            receipts = campaign.get("receipts") or []
+            receipt_path = receipts[-1] if isinstance(receipts, list) and receipts else ""
             runs.append({
                 "id": campaign.get("campaignId", "unknown"),
                 "name": campaign.get("intent", "Untitled"),
@@ -483,6 +485,9 @@ class MissionTruthProvider:
                 "started_at": campaign.get("createdAt", ""),
                 "progress_pct": pct,
                 "can_cancel": status == "running",
+                "owner": campaign.get("routedBy", ""),
+                "source": campaign.get("source", ""),
+                "receipt_path": receipt_path,
             })
         return runs
 

@@ -94,6 +94,9 @@ class ExecutionRun:
     started_at: Optional[datetime]
     progress_pct: Optional[int]
     can_cancel: bool = True
+    owner: str = ""           # e.g. regent-intent-router, operator
+    source: str = ""          # e.g. chat, ops_alert, github
+    receipt_path: str = ""    # path to canonical receipt
 
 
 @dataclass
@@ -2112,13 +2115,29 @@ class ExecutionRunCard(Gtk.Box):
             icon.add_css_class("accent")
         self.append(icon)
         
-        # Name
+        # Name + owner/source
+        name_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        name_box.set_hexpand(True)
+        self.append(name_box)
+
         name_label = Gtk.Label(label=run.name)
         name_label.set_xalign(0)
-        name_label.set_hexpand(True)
         name_label.set_ellipsize(Pango.EllipsizeMode.END)
         name_label.add_css_class("caption")
-        self.append(name_label)
+        name_box.append(name_label)
+
+        meta_parts = []
+        if run.source:
+            meta_parts.append(run.source)
+        if run.owner:
+            meta_parts.append(f"@{run.owner}")
+        if meta_parts:
+            meta_label = Gtk.Label(label=" · ".join(meta_parts))
+            meta_label.set_xalign(0)
+            meta_label.add_css_class("caption")
+            meta_label.add_css_class("dim-label")
+            meta_label.set_ellipsize(Pango.EllipsizeMode.END)
+            name_box.append(meta_label)
         
         pct = run.progress_pct if run.progress_pct is not None else 0
         pct_label = Gtk.Label(label=f"{pct}%")
@@ -2159,6 +2178,13 @@ class ExecutionRunCard(Gtk.Box):
         logs_btn.add_css_class("caption")
         logs_btn.connect("clicked", self._on_logs)
         self.append(logs_btn)
+
+        if run.receipt_path:
+            receipt_btn = Gtk.Button.new_from_icon_name("document-open-symbolic")
+            receipt_btn.add_css_class("flat")
+            receipt_btn.set_tooltip_text(str(run.receipt_path))
+            receipt_btn.connect("clicked", lambda _b: print(f"[Execute] Open receipt: {run.receipt_path}"))
+            self.append(receipt_btn)
 
     def _format_age(self, started_at) -> str:
         if not started_at:
@@ -2274,6 +2300,9 @@ class ExecuteColumn(Gtk.Box):
                 started_at=r.get("started_at"),
                 progress_pct=r.get("progress_pct"),
                 can_cancel=r.get("can_cancel", False),
+                owner=r.get("owner", ""),
+                source=r.get("source", ""),
+                receipt_path=r.get("receipt_path", ""),
             )
             for r in raw_runs
         ]
