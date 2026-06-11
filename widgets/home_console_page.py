@@ -37,6 +37,8 @@ from services.chat_service import (
 )
 from services.orchestrator_truth_provider import OrchestratorTruthProvider
 from widgets.operator_safety_rail import OperatorSafetyRail
+from widgets.truth_badge import TruthBadge, TruthBadgeGroup
+from services.factory_truth_service import get_factory_truth_service
 
 
 
@@ -813,6 +815,7 @@ class TalkColumn(Gtk.Box):
         self._routing_mode = "AUTO"  # CHAT, RAG, EXEC, AUTO
         self._pool_mode = "AUTO"  # AUTO, ROXY
         self._last_factory_truth: Dict[str, Any] = {}
+        self._last_factory_routes: Dict[str, Any] = {}
         
         # Services
         print("[TalkColumn] Getting services...")
@@ -1087,17 +1090,13 @@ class TalkColumn(Gtk.Box):
 
         # Factory truth strip: one compact source of route/status truth above input.
         factory_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        factory_row.add_css_class("linked")
+        factory_row.set_margin_bottom(6)
         input_area.append(factory_row)
 
-        self._factory_badge = Gtk.Button(label="Factory: --")
-        self._factory_badge.add_css_class("flat")
-        self._factory_badge.add_css_class("caption")
-        self._factory_badge.set_tooltip_text("Source: rcc factory.status")
-        self._factory_badge.connect("clicked", self._on_factory_badge_clicked)
+        self._factory_badge = TruthBadge("Factory", "UNPROVEN")
         factory_row.append(self._factory_badge)
 
-        self._route_truth_chips: Dict[str, Gtk.Label] = {}
+        self._route_truth_badges = TruthBadgeGroup(spacing=6)
         for key, label_text in [
             ("chat_proxy", "Proxy"),
             ("litellm", "LiteLLM"),
@@ -1105,12 +1104,8 @@ class TalkColumn(Gtk.Box):
             ("decode_6900xt", "6900XT"),
             ("judge_235b", "Judge"),
         ]:
-            chip = Gtk.Label(label=f"{label_text}: --")
-            chip.add_css_class("caption")
-            chip.add_css_class("dim-label")
-            chip.set_tooltip_text(f"{label_text}: waiting for rcc factory.status")
-            factory_row.append(chip)
-            self._route_truth_chips[key] = chip
+            self._route_truth_badges.set_badge(key, label_text, "LOADING")
+        factory_row.append(self._route_truth_badges)
         
         # Mode toggle row
         mode_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1204,22 +1199,7 @@ class TalkColumn(Gtk.Box):
         self._lane_dropdown.connect("notify::selected", self._on_lane_changed)
         lane_box.append(self._lane_dropdown)
         
-        # Lane health chips
-        self._lane_health_chips: Dict[str, Gtk.Label] = {}
-        for lane_key, label_text in [
-            ("frontier", "Ada"),
-            ("judge", "Judge"),
-            ("local", "Ollama"),
-            ("cloud", "Cloud"),
-        ]:
-            chip = Gtk.Label(label=f"{label_text}: --")
-            chip.add_css_class("dim-label")
-            chip.add_css_class("caption")
-            chip.set_tooltip_text(f"{label_text} lane health")
-            lane_box.append(chip)
-            self._lane_health_chips[lane_key] = chip
-        
-        # Currently using label
+        # Active route truth label (updated from last response)
         self._current_lane_label = Gtk.Label(label="Using: Auto")
         self._current_lane_label.add_css_class("dim-label")
         self._current_lane_label.add_css_class("caption")
@@ -1691,7 +1671,6 @@ class TalkColumn(Gtk.Box):
             self._current_lane_label.set_label(f"Using: {name}")
         print(f"[Talk] Lane: {lane} → {self._chat_service.selected_lane}")
         self._save_settings()
-        self._update_lane_health_display()
 
         # Credential-blocked warning for Cloud
         if lane == "cloud" and not os.environ.get("ANTHROPIC_API_KEY"):
@@ -1706,134 +1685,77 @@ class TalkColumn(Gtk.Box):
                 "⚠️ Judge selected: Qwen3-235B on CPU (~3.5 t/s). Responses may take 1–3 minutes."
             )
     
-    def _update_lane_health_display(self):
-        """Poll and display lane health from canonical apex-status.json."""
-        try:
-            if self._last_factory_truth:
-                self._update_factory_truth_display(self._last_factory_truth)
-                return
-            health = self._chat_service.get_lane_health()
-            for lane_key, chip in self._lane_health_chips.items():
-                info = health.get(lane_key)
-                if not info:
-                    chip.set_label(f"{chip.get_tooltip_text().split()[0]}: ❓")
-                    continue
-                name = chip.get_tooltip_text().split()[0]
-                tps = info.get("tps")
-                is_slow = tps is not None and tps < 10
-                if info.get("healthy"):
-                    if is_slow:
-                        chip.set_label(f"{name}: 🐢 {tps}t/s")
-                        chip.set_tooltip_text(f"{name} lane: alive but SLOW ({tps} t/s)")
-                    else:
-                        tps_str = f" {tps}t/s" if tps else ""
-                        chip.set_label(f"{name}: 🟢{tps_str}")
-                        chip.set_tooltip_text(f"{name} lane: healthy")
-                elif info.get("truthGrade") == "cloud_api":
-                    if lane_key == "cloud" and not os.environ.get("ANTHROPIC_API_KEY"):
-                        chip.set_label(f"{name}: 🔒 No key")
-                        chip.set_tooltip_text(f"{name} lane: ANTHROPIC_API_KEY not set — cloud API unavailable")
-                    else:
-                        chip.set_label(f"{name}: ☁️")
-                        chip.set_tooltip_text(f"{name} lane: cloud API")
-                elif info.get("truthGrade") in ("stale_log", "retired"):
-                    chip.set_label(f"{name}: ⚪")
-                    chip.set_tooltip_text(f"{name} lane: {info.get('truthGrade')}")
-                else:
-                    chip.set_label(f"{name}: 🔴")
-                    chip.set_tooltip_text(f"{name} lane: unhealthy")
-        except Exception as exc:
-            print(f"[Talk] Lane health update failed: {exc}")
-
     def update(self, data: dict):
         """Update the Chat cockpit from daemon + factory truth snapshots."""
         factory_truth = data.get("factoryTruth") or {}
         if factory_truth:
             self._last_factory_truth = factory_truth
             self._update_factory_truth_display(factory_truth)
-
-    def _on_factory_badge_clicked(self, _button):
-        truth = self._last_factory_truth or {}
-        verdict = truth.get("verdict", "UNKNOWN")
-        receipt = truth.get("receiptPath") or "no receipt"
-        warnings = truth.get("warnings") or []
-        errors = truth.get("errors") or []
-        lines = [f"Factory: {verdict}", f"Receipt: {receipt}"]
-        if errors:
-            lines.append("Errors: " + "; ".join(errors[:3]))
-        if warnings:
-            lines.append("Warnings: " + "; ".join(warnings[:3]))
-        self._append_system_message("\n".join(lines))
+        factory_routes = data.get("factoryRoutes") or {}
+        if factory_routes:
+            self._last_factory_routes = factory_routes
 
     def _update_factory_truth_display(self, truth: Dict[str, Any]):
+        """Render Factory status and route truth using TruthBadge components."""
         verdict = truth.get("verdict", "UNKNOWN")
         ready = truth.get("ready") or {}
         services = truth.get("servicesById") or {}
         receipt = truth.get("receiptPath") or ""
+        generated_at = truth.get("generatedAt")
+        stale = truth.get("stale", False)
+        stale_reason = truth.get("staleReason")
+        command_id = truth.get("commandId", "factory.status")
+        warnings = truth.get("warnings") or []
+        errors = truth.get("errors") or []
+
+        provenance = {
+            "source": "rcc",
+            "command": command_id,
+            "timestamp": generated_at,
+            "receiptPath": receipt,
+            "stale": stale,
+        }
+
+        detail_parts = []
+        if stale:
+            detail_parts.append(f"STALE: {stale_reason or 'refresh failed'}")
+        if warnings:
+            detail_parts.append("; ".join(warnings[:2]))
+        if errors:
+            detail_parts.append("; ".join(errors[:2]))
 
         if hasattr(self, "_factory_badge") and self._factory_badge:
-            icon = "✅" if verdict == "PASS" else "⚠️" if verdict == "DEGRADED" else "❌"
-            self._factory_badge.set_label(f"{icon} Factory {verdict}")
-            self._factory_badge.set_tooltip_text(
-                f"Source: rcc factory.status\nReceipt: {receipt or 'not written'}"
+            self._factory_badge.set_truth(
+                verdict,
+                provenance,
+                detail="; ".join(detail_parts) if detail_parts else ""
             )
 
-        for key, chip in getattr(self, "_route_truth_chips", {}).items():
-            svc = services.get(key, {}) if isinstance(services, dict) else {}
-            label = {
-                "chat_proxy": "Proxy",
-                "litellm": "LiteLLM",
-                "frontier": "Ada",
-                "decode_6900xt": "6900XT",
-                "judge_235b": "Judge",
-            }.get(key, key)
-            is_ready = bool(svc.get("ready")) or bool(ready.get({
-                "chat_proxy": "chatProxy",
-                "litellm": "litellm",
-                "frontier": "qwenMtp",
-                "decode_6900xt": "decode6900xt",
-                "judge_235b": "judge",
-            }.get(key, key)))
-            port = svc.get("port", "")
-            status = svc.get("status", "unknown")
-            chip.set_label(f"{label}: {'OK' if is_ready else 'FAIL'}")
-            chip.set_tooltip_text(
-                f"{label}\nSource: rcc factory.status\nPort: {port or 'unknown'}\nStatus: {status}"
-            )
-
-        # Keep legacy lane chips aligned with the same factory truth.
-        lane_map = {
-            "frontier": ("Ada", "frontier", "qwenMtp"),
-            "judge": ("Judge", "judge_235b", "judge"),
-            "local": ("Ollama", None, None),
-            "cloud": ("Cloud", None, None),
-        }
-        for lane_key, chip in self._lane_health_chips.items():
-            name, service_id, ready_key = lane_map.get(lane_key, (lane_key, None, None))
-            if service_id:
-                svc = services.get(service_id, {}) if isinstance(services, dict) else {}
-                ok = bool(svc.get("ready")) or bool(ready.get(ready_key))
-                chip.set_label(f"{name}: {'🟢' if ok else '🔴'}")
-                chip.set_tooltip_text(
-                    f"{name} lane from rcc factory.status\n"
-                    f"Port: {svc.get('port', 'unknown')}\nStatus: {svc.get('status', 'unknown')}"
+        badge_group = getattr(self, "_route_truth_badges", None)
+        if badge_group:
+            route_map = {
+                "chat_proxy": ("Proxy", "chatProxy"),
+                "litellm": ("LiteLLM", "litellm"),
+                "frontier": ("Ada", "qwenMtp"),
+                "decode_6900xt": ("6900XT", "decode6900xt"),
+                "judge_235b": ("Judge", "judge"),
+            }
+            for key, (label, ready_key) in route_map.items():
+                svc = services.get(key, {}) if isinstance(services, dict) else {}
+                is_ready = bool(svc.get("ready")) or bool(ready.get(ready_key))
+                port = svc.get("port", "")
+                status = svc.get("status", "unknown")
+                detail = f"port {port}, status {status}" if port else f"status {status}"
+                if stale:
+                    detail += " (stale)"
+                badge_group.set_badge(
+                    key,
+                    label,
+                    "PASS" if is_ready else "FAIL",
+                    provenance,
+                    detail=detail,
                 )
-            elif lane_key == "local":
-                chip.set_label("Ollama: ⚪ optional")
-                chip.set_tooltip_text("Optional local utility lane; not required for Factory PASS")
-            elif lane_key == "cloud":
-                has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-                chip.set_label("Cloud: ☁️" if has_key else "Cloud: 🔒 No key")
-                chip.set_tooltip_text("Cloud/API fallback; requires ANTHROPIC_API_KEY")
-    
-    def _start_lane_health_polling(self):
-        """Start periodic lane health updates every 30s."""
-        self._update_lane_health_display()
-        def _poll():
-            self._update_lane_health_display()
-            return True  # Continue polling
-        GLib.timeout_add_seconds(30, _poll)
-    
+
     def _on_ask_judge(self, button, text: str):
         """Send current message/plan to Judge lane for adversarial review."""
         print(f"[Talk] Asking Judge to review: {text[:60]}...")

@@ -664,13 +664,24 @@ class MainWindow(Adw.ApplicationWindow):
                 # Normalize to canonical schema
                 data = normalize_status(raw_data)
                 try:
-                    data["factoryTruth"] = get_factory_truth_service().snapshot()
+                    status_snap = get_factory_truth_service().get_status()
+                    data["factoryTruth"] = status_snap.as_dict()
                 except Exception as exc:
                     data["factoryTruth"] = {
                         "verdict": "UNKNOWN",
                         "ready": {},
                         "servicesById": {},
                         "warnings": [f"factory.status unavailable: {exc}"],
+                        "errors": [],
+                    }
+                try:
+                    routes_snap = get_factory_truth_service().get_routes()
+                    data["factoryRoutes"] = routes_snap.as_dict()
+                except Exception as exc:
+                    data["factoryRoutes"] = {
+                        "verdict": "UNKNOWN",
+                        "routesById": {},
+                        "warnings": [f"factory.routes unavailable: {exc}"],
                         "errors": [],
                     }
                 self._current_data = data
