@@ -107,6 +107,10 @@ class TruthBadge(Gtk.Box):
         self.set_css_name("box")
         self._apply_style(bg, color)
 
+    @property
+    def state(self) -> str:
+        return self._state
+
     def _has_provenance(self) -> bool:
         return bool(self._provenance) and REQUIRED_PROVENANCE.issubset(self._provenance.keys())
 
