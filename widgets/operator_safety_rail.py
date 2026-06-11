@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, List, Tuple
 
 from widgets.graph_widget import SparklineWidget
 from services.telemetry_collector import get_collector
+from services.memory_truth_service import get_memory_truth_service
 
 
 def _status_color(status: str) -> Tuple[float, float, float]:
@@ -137,6 +138,13 @@ class OperatorSafetyRail(Gtk.Box):
         self._add_row("gpu_w5700x", "W5700X", (0.93, 0.27, 0.27))
         self._add_row("gpu_6900xt", "6900XT", (0.58, 0.30, 0.95))
 
+        # ── Memory ──
+        self._add_section_header("Memory")
+        self._add_row("mem_qdrant", "Qdrant", (0.21, 0.82, 0.50))
+        self._add_row("mem_sqlite", "SQLite", (0.48, 0.23, 0.93))
+        self._add_row("mem_fallback", "Fallback", (0.96, 0.71, 0.29))
+        self._add_row("mem_candidates", "Candidates", (0.58, 0.30, 0.95))
+
         # ── Routes ──
         self._add_section_header("Routes")
         self._add_row("proxy", "Proxy", (0.21, 0.82, 0.50))
@@ -216,6 +224,55 @@ class OperatorSafetyRail(Gtk.Box):
                 self._rows["gpu_6900xt"].set_value(f"{util:.0f}%", subtitle, status, coll.get(f"gpu{i}"))
             elif "W5700X" in name or "Radeon Pro" in name:
                 self._rows["gpu_w5700x"].set_value(f"{util:.0f}%", subtitle, status, coll.get(f"gpu{i}"))
+
+        # ── Memory ──
+        try:
+            mem = get_memory_truth_service().snapshot()
+            mem_dict = mem.to_dict() if hasattr(mem, "to_dict") else mem
+        except Exception as exc:
+            mem_dict = {"ok": False, "error": str(exc)}
+
+        qdrant = mem_dict.get("qdrant") or {}
+        qdrant_points = qdrant.get("pointsCount") or qdrant.get("indexedVectorsCount") or 0
+        qdrant_status = qdrant.get("status") or ("live" if mem_dict.get("ok") else "unavailable")
+        if "mem_qdrant" in self._rows:
+            self._rows["mem_qdrant"].set_value(
+                f"{qdrant_points}",
+                qdrant.get("retrievalMode") or qdrant_status,
+                "ready" if qdrant_status == "live" else ("off" if qdrant_status == "unavailable" else "warn"),
+                tooltip=f"Qdrant: {qdrant_status}\nPoints: {qdrant_points}\nMode: {qdrant.get('retrievalMode', 'unknown')}",
+            )
+
+        storage = mem_dict.get("brainStorage") or {}
+        storage_status = storage.get("status") or "unknown"
+        counts = storage.get("counts") or {}
+        if "mem_sqlite" in self._rows:
+            self._rows["mem_sqlite"].set_value(
+                f"{counts.get('messages', 0)}",
+                storage_status,
+                "ready" if storage_status == "live" else "error",
+                tooltip=f"SQLite: {storage_status}\nSessions: {counts.get('sessions', 0)}\nMessages: {counts.get('messages', 0)}",
+            )
+
+        fallback = mem_dict.get("fallbackUsed") or False
+        mem_status = mem_dict.get("memoryStatus") or {}
+        truth_verdict = mem_status.get("truthVerdict") or ("fallback" if fallback else "live")
+        if "mem_fallback" in self._rows:
+            self._rows["mem_fallback"].set_value(
+                "ON" if fallback else "OFF",
+                truth_verdict[:20],
+                "warn" if fallback else "ready",
+                tooltip=f"Fallback: {fallback}\nVerdict: {truth_verdict}",
+            )
+
+        candidates = mem_dict.get("candidates") or []
+        if "mem_candidates" in self._rows:
+            self._rows["mem_candidates"].set_value(
+                f"{len(candidates)}",
+                "pending facts",
+                "ready" if len(candidates) > 0 else "off",
+                tooltip=f"Memory candidates: {len(candidates)}",
+            )
 
         # ── Routes: factory.status is the source of truth. Do not show "?"
         # when a live RCC probe has already proved the port.
