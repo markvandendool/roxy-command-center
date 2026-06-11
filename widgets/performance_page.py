@@ -1,389 +1,430 @@
 #!/usr/bin/env python3
 """
-Performance Page — Situational awareness, not device enumeration.
+Performance Page — Mission Center-style situational awareness.
 
-Groups:
-  SYSTEM   → CPU, Memory, Swap, Thermals
-  COMPUTE  → GPUs by real name (RTX 4000 Ada, RX 6900 XT, W5700X)
-  STORAGE  → Root, Work, NVMe
-  NETWORK  → Network throughput
-  AGENTS   → Agents, MCP
+Layout (Mission Center inspired):
+  LEFT  → Device list (CPU, Memory, GPUs, Storage, Network)
+  CENTER → Big graph for selected device
+  RIGHT  → Exact current values and facts
+
+Selection:
+  - Click a device in the left list to focus it
+  - Big graph shows 10-minute history
+  - Facts panel shows exact current values
 
 Principles:
   - Names over indices
-  - Semantic groups over kernel enumeration
-  - Current value + history + threshold (Grafana principle)
+  - Semantic groups
+  - Current value + history + threshold
+  - Left rail always visible
 """
 
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib
-from typing import Optional, Dict, Any, List
+from gi.repository import Gtk, Adw, GLib, Gdk
+from typing import Optional, Dict, Any, List, Tuple
 
 from widgets.circular_meter import CircularMeter
-from widgets.graph_widget import SparklineWidget
+from widgets.graph_widget import GraphWidget, GraphConfig, GraphStyle
 from services.telemetry_collector import get_collector
 
 
-class DeviceCard(Gtk.Box):
-    """A compact device card with value, subtitle, and sparkline."""
+class DeviceListItem(Gtk.Box):
+    """A selectable row in the left device rail."""
 
-    def __init__(self, title: str, icon_name: str = "", color: tuple = (0.0, 0.8, 0.5)):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.add_css_class("device-card")
-        self.set_margin_top(8)
-        self.set_margin_bottom(8)
+    def __init__(self, device_id: str, name: str, icon_name: str = "",
+                 color: Tuple[float, float, float] = (0.13, 0.77, 0.37)):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.device_id = device_id
+        self._color = color
+        self.set_margin_top(4)
+        self.set_margin_bottom(4)
         self.set_margin_start(8)
         self.set_margin_end(8)
 
-        # Header
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.append(header)
+        # Selection styling
+        self.add_css_class("device-list-item")
 
+        # Icon
         if icon_name:
-            icon = Gtk.Image.new_from_icon_name(icon_name)
-            icon.set_pixel_size(18)
-            header.append(icon)
-
-        self.title_label = Gtk.Label(label=title)
-        self.title_label.add_css_class("device-title")
-        self.title_label.set_xalign(0)
-        self.title_label.set_hexpand(True)
-        header.append(self.title_label)
-
-        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        body.set_hexpand(True)
-        self.append(body)
-
-        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        text_box.set_hexpand(True)
-        body.append(text_box)
-
-        self.value_label = Gtk.Label(label="--")
-        self.value_label.add_css_class("device-value")
-        self.value_label.set_xalign(0)
-        text_box.append(self.value_label)
-
-        self.subtitle_label = Gtk.Label(label="")
-        self.subtitle_label.add_css_class("device-subtitle")
-        self.subtitle_label.set_xalign(0)
-        self.subtitle_label.set_wrap(True)
-        text_box.append(self.subtitle_label)
-
-        self.meter = CircularMeter(size=72)
-        self.meter.set_valign(Gtk.Align.CENTER)
-        self.meter.set_visible(False)
-        body.append(self.meter)
-
-        # Sparkline
-        self.sparkline = SparklineWidget(color=color)
-        self.sparkline.set_margin_top(4)
-        self.append(self.sparkline)
-
-        self._color = color
-
-    def set_title(self, title: str):
-        self.title_label.set_label(title)
-
-    def set_value(self, value: str, subtitle: str = "", meter_percent: Optional[float] = None, meter_caption: str = "", status: str = "info", history: list = None):
-        self.value_label.set_label(value)
-        self.subtitle_label.set_label(subtitle)
-        if meter_percent is None:
-            self.meter.set_visible(False)
-            self.sparkline.set_visible(True)
-            if history is not None and len(history) >= 2:
-                self.sparkline.set_history(history)
-            else:
-                self.sparkline.set_history([])
+            self._icon = Gtk.Image.new_from_icon_name(icon_name)
+            self._icon.set_pixel_size(16)
+            self.append(self._icon)
         else:
-            self.meter.set_visible(True)
-            self.sparkline.set_visible(False)
-            self.meter.set_value(meter_percent, f"{meter_percent:.0f}%", meter_caption, status)
+            self._icon = None
 
-    def set_status_color(self, status: str):
-        """status: healthy, warn, blocked"""
-        self.remove_css_class("status-healthy")
-        self.remove_css_class("status-warn")
-        self.remove_css_class("status-blocked")
-        if status in ("healthy", "warn", "blocked"):
-            self.add_css_class(f"status-{status}")
+        # Name
+        self._name_label = Gtk.Label(label=name)
+        self._name_label.add_css_class("caption")
+        self._name_label.set_xalign(0)
+        self._name_label.set_hexpand(True)
+        self.append(self._name_label)
+
+        # Value
+        self._value_label = Gtk.Label(label="--")
+        self._value_label.add_css_class("caption")
+        self._value_label.add_css_class("monospace")
+        self._value_label.set_xalign(1)
+        self.append(self._value_label)
+
+        # Status dot
+        self._dot = Gtk.Label(label="●")
+        self._dot.set_markup("<span color='#8fa0b5'>●</span>")
+        self.append(self._dot)
+
+    def set_value(self, value: str, status: str = "healthy"):
+        self._value_label.set_label(value)
+        if status == "healthy":
+            color = "#35d07f"
+        elif status == "warn":
+            color = "#f5b64a"
+        elif status == "blocked":
+            color = "#f06464"
+        else:
+            color = "#8fa0b5"
+        self._dot.set_markup(f'<span color="{color}">●</span>')
 
 
-class SectionBox(Gtk.Box):
-    """A titled section containing a FlowBox of cards."""
+class DeviceDetailView(Gtk.Box):
+    """Main panel: big graph + facts for the selected device."""
 
-    def __init__(self, title: str, max_columns: int = 4):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.set_margin_top(8)
-        self.set_margin_bottom(8)
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.set_margin_top(16)
+        self.set_margin_bottom(16)
+        self.set_margin_start(16)
+        self.set_margin_end(16)
 
-        self.title_label = Gtk.Label(label=title)
-        self.title_label.add_css_class("title-3")
-        self.title_label.set_xalign(0)
-        self.append(self.title_label)
+        # Title
+        self._title = Gtk.Label(label="Select a device")
+        self._title.add_css_class("title-2")
+        self._title.set_xalign(0)
+        self.append(self._title)
 
-        self.flow = Gtk.FlowBox()
-        self.flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.flow.set_homogeneous(True)
-        self.flow.set_min_children_per_line(1)
-        self.flow.set_max_children_per_line(max_columns)
-        self.flow.set_column_spacing(12)
-        self.flow.set_row_spacing(12)
-        self.append(self.flow)
+        # Big graph
+        config = GraphConfig(
+            history_seconds=600,
+            update_interval_ms=5000,
+            style=GraphStyle.FILLED,
+            color=(0.31, 0.76, 0.97),
+            fill_alpha=0.25,
+            line_width=2.0,
+            show_grid=True,
+            grid_lines=5,
+            show_current_value=True,
+            value_format="{:.1f}",
+            value_suffix="",
+        )
+        self._graph = GraphWidget(config)
+        self._graph.set_vexpand(True)
+        self._graph.set_size_request(-1, 300)
+        self.append(self._graph)
 
-    def add_card(self, widget: Gtk.Widget):
-        self.flow.append(widget)
+        # Facts grid
+        self._facts_box = Gtk.Grid()
+        self._facts_box.set_row_spacing(8)
+        self._facts_box.set_column_spacing(16)
+        self._facts_box.set_margin_top(8)
+        self.append(self._facts_box)
 
-    def clear_cards(self):
+        self._fact_labels: Dict[str, Gtk.Label] = {}
+        self._current_device: Optional[str] = None
+
+    def show_device(self, device_id: str, name: str, history: List[float],
+                    facts: Dict[str, str], color: Tuple[float, float, float] = (0.31, 0.76, 0.97)):
+        """Display a device in the detail view."""
+        self._current_device = device_id
+        self._title.set_label(name)
+
+        # Update graph color
+        self._graph._line_color = color
+        self._graph._fill_color = (*color, self._graph.config.fill_alpha)
+
+        # Load history into graph
+        self._graph._data.clear()
+        for v in history:
+            self._graph._data.append(float(v))
+        # Pad to max points
+        while len(self._graph._data) < self._graph._max_points:
+            self._graph._data.append(0.0)
+        self._graph.queue_draw()
+
+        # Update facts
+        # Clear old facts
         while True:
-            child = self.flow.get_first_child()
+            child = self._facts_box.get_first_child()
             if child is None:
                 break
-            self.flow.remove(child)
+            self._facts_box.remove(child)
+        self._fact_labels.clear()
+
+        row = 0
+        col = 0
+        for key, value in facts.items():
+            key_lbl = Gtk.Label(label=key)
+            key_lbl.add_css_class("caption")
+            key_lbl.set_opacity(0.7)
+            key_lbl.set_xalign(0)
+            self._facts_box.attach(key_lbl, col * 2, row, 1, 1)
+
+            val_lbl = Gtk.Label(label=value)
+            val_lbl.add_css_class("monospace")
+            val_lbl.set_xalign(0)
+            self._facts_box.attach(val_lbl, col * 2 + 1, row, 1, 1)
+            self._fact_labels[key] = val_lbl
+
+            col += 1
+            if col > 2:
+                col = 0
+                row += 1
+
+    def update_facts(self, facts: Dict[str, str]):
+        """Update fact values without rebuilding the grid."""
+        for key, value in facts.items():
+            if key in self._fact_labels:
+                self._fact_labels[key].set_label(value)
 
 
-class PerformancePage(Gtk.ScrolledWindow):
+class PerformancePage(Gtk.Box):
     """
-    Performance dashboard organized by situational awareness:
-    SYSTEM → COMPUTE → STORAGE → NETWORK → AGENTS
+    Mission Center-style performance dashboard.
+    LEFT: device list  |  CENTER+RIGHT: graph + facts
     """
 
     def __init__(self):
-        super().__init__()
-        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self._cards: Dict[str, DeviceCard] = {}
-        self._gpu_cards: Dict[int, DeviceCard] = {}
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self._devices: Dict[str, DeviceListItem] = {}
+        self._device_meta: Dict[str, Dict[str, Any]] = {}
+        self._selected_device: str = "cpu"
         self._build_ui()
 
     def _build_ui(self):
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        main_box.set_margin_top(24)
-        main_box.set_margin_bottom(24)
-        main_box.set_margin_start(24)
-        main_box.set_margin_end(24)
-        self.set_child(main_box)
+        # ── LEFT: Device rail ──
+        left_scroll = Gtk.ScrolledWindow()
+        left_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        left_scroll.set_size_request(200, -1)
+        self.append(left_scroll)
 
-        # Title
-        title = Gtk.Label(label="Performance")
-        title.add_css_class("title-1")
-        title.set_xalign(0)
-        main_box.append(title)
+        self._device_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._device_list.set_margin_top(12)
+        self._device_list.set_margin_bottom(12)
+        left_scroll.set_child(self._device_list)
 
-        # Status strip
-        self.status_strip = Gtk.Label(label="Loading...")
-        self.status_strip.add_css_class("caption")
-        self.status_strip.set_xalign(0)
-        main_box.append(self.status_strip)
+        # Section headers + devices
+        self._add_section("System")
+        self._add_device("cpu", "CPU", "computer-symbolic", (0.13, 0.77, 0.37))
+        self._add_device("memory", "Memory", "drive-harddisk-symbolic", (0.48, 0.23, 0.93))
+        self._add_device("swap", "Swap", "media-removable-symbolic", (0.96, 0.62, 0.04))
+        self._add_device("thermals", "Thermals", "temperature-symbolic", (0.93, 0.27, 0.27))
 
-        # ── SYSTEM ──
-        self.system_section = SectionBox("System", max_columns=4)
-        main_box.append(self.system_section)
+        self._add_section("Compute")
+        self._add_device("gpu_ada", "RTX 4000 Ada", "video-display-symbolic", (0.13, 0.59, 0.95))
+        self._add_device("gpu_w5700x", "W5700X", "video-display-symbolic", (0.93, 0.27, 0.27))
+        self._add_device("gpu_6900xt", "RX 6900 XT", "video-display-symbolic", (0.58, 0.30, 0.95))
 
-        for key, title, icon, color in [
-            ("cpu", "CPU", "computer-symbolic", (0.13, 0.77, 0.37)),
-            ("memory", "Memory", "drive-harddisk-symbolic", (0.48, 0.23, 0.93)),
-            ("swap", "Swap", "media-removable-symbolic", (0.96, 0.62, 0.04)),
-            ("thermals", "Thermals", "temperature-symbolic", (0.93, 0.27, 0.27)),
-        ]:
-            card = DeviceCard(title, icon, color)
-            self._cards[key] = card
-            self.system_section.add_card(card)
+        self._add_section("Storage")
+        self._add_device("root", "Root", "drive-harddisk-system-symbolic", (0.20, 0.80, 0.60))
+        self._add_device("work", "Work", "folder-symbolic", (0.13, 0.59, 0.95))
+        self._add_device("nvme", "NVMe", "drive-harddisk-symbolic", (0.58, 0.30, 0.95))
 
-        # ── COMPUTE ──
-        self.compute_section = SectionBox("Compute", max_columns=3)
-        main_box.append(self.compute_section)
-        # GPU cards created dynamically on first data arrival
+        self._add_section("Network")
+        self._add_device("network", "Network", "network-wireless-symbolic", (0.13, 0.77, 0.37))
 
-        # ── STORAGE ──
-        self.storage_section = SectionBox("Storage", max_columns=4)
-        main_box.append(self.storage_section)
+        self._add_section("Agents")
+        self._add_device("agents", "Agents", "applications-games-symbolic", (0.96, 0.62, 0.04))
+        self._add_device("mcp", "MCP", "preferences-system-symbolic", (0.48, 0.23, 0.93))
 
-        for key, title, icon, color in [
-            ("root", "Root", "drive-harddisk-system-symbolic", (0.20, 0.80, 0.60)),
-            ("work", "Work", "folder-symbolic", (0.13, 0.59, 0.95)),
-            ("nvme", "NVMe", "drive-harddisk-symbolic", (0.58, 0.30, 0.95)),
-        ]:
-            card = DeviceCard(title, icon, color)
-            self._cards[key] = card
-            self.storage_section.add_card(card)
+        # Select first device
+        self._select_device("cpu")
 
-        # ── NETWORK ──
-        self.network_section = SectionBox("Network", max_columns=3)
-        main_box.append(self.network_section)
+        # ── CENTER+RIGHT: Detail view ──
+        self._detail = DeviceDetailView()
+        self._detail.set_hexpand(True)
+        self.append(self._detail)
 
-        for key, title, icon, color in [
-            ("network", "Network", "network-wireless-symbolic", (0.13, 0.77, 0.37)),
-        ]:
-            card = DeviceCard(title, icon, color)
-            self._cards[key] = card
-            self.network_section.add_card(card)
+        # Add CSS for selection
+        self._setup_css()
 
-        # ── AGENTS ──
-        self.agents_section = SectionBox("Agents", max_columns=3)
-        main_box.append(self.agents_section)
+    def _setup_css(self):
+        css = """
+        .device-list-item {
+            border-radius: 6px;
+            padding: 6px 8px;
+        }
+        .device-list-item:hover {
+            background-color: alpha(@moc_surface_3, 0.5);
+        }
+        .device-list-item.selected {
+            background-color: alpha(@moc_surface_3, 0.85);
+            border-left: 3px solid @moc_cyan;
+        }
+        """
+        provider = Gtk.CssProvider()
+        provider.load_from_data(css.encode())
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
-        for key, title, icon, color in [
-            ("agents", "Agents", "applications-games-symbolic", (0.96, 0.62, 0.04)),
-            ("mcp", "MCP", "preferences-system-symbolic", (0.48, 0.23, 0.93)),
-        ]:
-            card = DeviceCard(title, icon, color)
-            self._cards[key] = card
-            self.agents_section.add_card(card)
+    def _add_section(self, title: str):
+        lbl = Gtk.Label(label=title)
+        lbl.add_css_class("caption")
+        lbl.set_xalign(0)
+        lbl.set_margin_top(10)
+        lbl.set_margin_start(8)
+        lbl.set_margin_bottom(2)
+        lbl.set_opacity(0.6)
+        self._device_list.append(lbl)
 
-        # ── Detail sections ──
-        detail_title = Gtk.Label(label="CPU Detail")
-        detail_title.add_css_class("title-3")
-        detail_title.set_xalign(0)
-        detail_title.set_margin_top(16)
-        main_box.append(detail_title)
+    def _add_device(self, device_id: str, name: str, icon: str, color: Tuple[float, float, float]):
+        item = DeviceListItem(device_id, name, icon, color)
+        item.set_hexpand(True)
+        # Make clickable
+        gesture = Gtk.GestureClick()
+        gesture.connect("pressed", lambda _g, _n, _x, _y: self._select_device(device_id))
+        item.add_controller(gesture)
+        self._devices[device_id] = item
+        self._device_meta[device_id] = {"name": name, "color": color, "icon": icon}
+        self._device_list.append(item)
 
-        self.cpu_detail = Gtk.Label(label="")
-        self.cpu_detail.add_css_class("monospace")
-        self.cpu_detail.set_xalign(0)
-        main_box.append(self.cpu_detail)
+    def _select_device(self, device_id: str):
+        self._selected_device = device_id
+        for did, item in self._devices.items():
+            if did == device_id:
+                item.add_css_class("selected")
+            else:
+                item.remove_css_class("selected")
 
-        gpu_title = Gtk.Label(label="GPU Detail")
-        gpu_title.add_css_class("title-3")
-        gpu_title.set_xalign(0)
-        gpu_title.set_margin_top(16)
-        main_box.append(gpu_title)
-
-        self.gpu_detail = Gtk.Label(label="")
-        self.gpu_detail.add_css_class("monospace")
-        self.gpu_detail.set_xalign(0)
-        main_box.append(self.gpu_detail)
-
-    def _ensure_gpu_card(self, index: int, name: str, color: tuple) -> DeviceCard:
-        """Lazy-create GPU cards with real hardware names."""
-        if index in self._gpu_cards:
-            card = self._gpu_cards[index]
-            card.set_title(name)
-            return card
-
-        # Create new card
-        card = DeviceCard(name, "video-display-symbolic", color)
-        self._gpu_cards[index] = card
-        self.compute_section.add_card(card)
-        return card
+        meta = self._device_meta.get(device_id, {})
+        coll = get_collector()
+        history = coll.get(device_id, [])
+        self._detail.show_device(device_id, meta.get("name", device_id), history, {}, meta.get("color"))
 
     def update(self, data: dict):
         perf = data.get("performance") or {}
         if not perf:
             return
 
-        perf_status = perf.get("status", "unknown")
-        self.status_strip.set_label(f"Status: {perf_status.upper()}")
-        if perf_status == "blocked":
-            self.status_strip.add_css_class("status-blocked-text")
-        elif perf_status == "warn":
-            self.status_strip.add_css_class("status-warn-text")
-        else:
-            self.status_strip.remove_css_class("status-blocked-text")
-            self.status_strip.remove_css_class("status-warn-text")
-
         coll = get_collector()
+        status = "healthy"
 
-        # ── SYSTEM ──
-        # CPU
+        # ── System ──
         cpu = perf.get("cpu", {})
         cpu_util = cpu.get("utilPct", 0)
         load1 = cpu.get("load1", 0)
-        if "cpu" in self._cards:
-            c = self._cards["cpu"]
+        if "cpu" in self._devices:
             status = "blocked" if cpu_util > 80 else "warn" if cpu_util > 60 else "healthy"
-            c.set_value(f"{cpu_util:.1f}%", f"Load: {load1:.1f}", cpu_util, "CPU", status)
-            c.set_status_color(status)
+            self._devices["cpu"].set_value(f"{cpu_util:.0f}%", status)
+            if self._selected_device == "cpu":
+                self._detail.update_facts({
+                    "Utilization": f"{cpu_util:.1f}%",
+                    "Load 1m": f"{load1:.2f}",
+                    "Load 5m": f"{cpu.get('load5', 0):.2f}",
+                    "Load 15m": f"{cpu.get('load15', 0):.2f}",
+                })
 
-        # Memory
         mem = data.get("hostMemory", {}).get("ram", {})
         used_gb = mem.get("usedGb", 0)
         total_gb = mem.get("totalGb", 1)
         pct = (used_gb / total_gb * 100) if total_gb > 0 else 0
-        if "memory" in self._cards:
-            c = self._cards["memory"]
+        if "memory" in self._devices:
             status = "blocked" if pct > 90 else "warn" if pct > 75 else "healthy"
-            c.set_value(f"{used_gb:.1f} GB", f"{pct:.0f}% of {total_gb:.0f} GB", pct, "RAM", status)
-            c.set_status_color(status)
+            self._devices["memory"].set_value(f"{pct:.0f}%", status)
+            if self._selected_device == "memory":
+                self._detail.update_facts({
+                    "Used": f"{used_gb:.1f} GB",
+                    "Total": f"{total_gb:.0f} GB",
+                    "Percent": f"{pct:.1f}%",
+                })
 
-        # Swap
         swap = data.get("hostMemory", {}).get("swap", {})
         swap_used = swap.get("usedGb", 0)
         swap_total = swap.get("totalGb", 1)
         swap_pct = (swap_used / swap_total * 100) if swap_total > 0 else 0
-        if "swap" in self._cards:
-            c = self._cards["swap"]
+        if "swap" in self._devices:
             status = "blocked" if swap_pct > 80 else "warn" if swap_pct > 50 else "healthy"
-            c.set_value(f"{swap_used:.1f} GB", f"{swap_pct:.0f}% of {swap_total:.0f} GB", swap_pct, "swap", status)
-            c.set_status_color(status)
+            self._devices["swap"].set_value(f"{swap_pct:.0f}%", status)
+            if self._selected_device == "swap":
+                self._detail.update_facts({
+                    "Used": f"{swap_used:.1f} GB",
+                    "Total": f"{swap_total:.0f} GB",
+                })
 
-        # Thermals
         temps = data.get("idle_health", {}).get("temperature", {})
         hottest = temps.get("hottest_c", 0)
-        cpu_temp = temps.get("cpu_c", 0)
-        gpu_temp = temps.get("gpu_max_c", 0)
-        nvme_temp = temps.get("nvme_max_c", 0)
-        if "thermals" in self._cards:
-            c = self._cards["thermals"]
+        if "thermals" in self._devices:
             status = "blocked" if hottest > 85 else "warn" if hottest > 70 else "healthy"
-            subtitle = f"CPU {cpu_temp:.0f}°C  GPU {gpu_temp:.0f}°C  NVMe {nvme_temp:.0f}°C"
-            c.set_value(f"{hottest:.0f}°C", subtitle, history=coll.get("thermals"))
-            c.set_status_color(status)
+            self._devices["thermals"].set_value(f"{hottest:.0f}°C", status)
+            if self._selected_device == "thermals":
+                self._detail.update_facts({
+                    "Hottest": f"{hottest:.0f}°C",
+                    "CPU": f"{temps.get('cpu_c', 0):.0f}°C",
+                    "GPU max": f"{temps.get('gpu_max_c', 0):.0f}°C",
+                    "NVMe max": f"{temps.get('nvme_max_c', 0):.0f}°C",
+                })
 
-        # ── COMPUTE (GPUs by real name) ──
+        # ── Compute (GPUs) ──
         gpu_data = perf.get("gpu", {})
         gpus = gpu_data.get("gpus", [])
-        gpu_colors = [
-            (0.13, 0.59, 0.95),  # NVIDIA blue
-            (0.93, 0.27, 0.27),  # AMD red
-            (0.58, 0.30, 0.95),  # AMD pro purple
-        ]
-        for i, gpu in enumerate(gpus[:3]):
-            name = gpu.get("name", f"GPU {i}")
-            # Shorten common names
-            name = self._shorten_gpu_name(name)
+        gpu_map = {
+            "gpu_ada": lambda n: "RTX 4000" in n or "RTX A4000" in n,
+            "gpu_w5700x": lambda n: "W5700X" in n or "Radeon Pro" in n,
+            "gpu_6900xt": lambda n: "RX 6900 XT" in n,
+        }
+        for i, gpu in enumerate(gpus):
+            name = gpu.get("name", "")
             util = gpu.get("utilPct", 0)
             temp = gpu.get("tempC", 0)
             vram_used = gpu.get("vramUsedMiB", 0)
             vram_total = gpu.get("vramTotalMiB", 1)
-            vram_pct = (vram_used / vram_total * 100) if vram_total > 0 else 0
+            vram_gb = vram_used / 1024
+            vram_total_gb = vram_total / 1024
             status = "blocked" if util > 95 else "warn" if util > 80 else "healthy"
 
-            # Map collector key: gpu0, gpu1, gpu2
-            card = self._ensure_gpu_card(i, name, gpu_colors[i % len(gpu_colors)])
-            subtitle = f"{temp}°C · {vram_used / 1024:.1f} / {vram_total / 1024:.1f} GB"
-            card.set_value(f"{util:.0f}%", subtitle, util, "GPU", status)
-            card.set_status_color(status)
+            for did, matcher in gpu_map.items():
+                if matcher(name):
+                    self._devices[did].set_value(f"{util:.0f}%", status)
+                    if self._selected_device == did:
+                        self._detail.update_facts({
+                            "Utilization": f"{util:.0f}%",
+                            "Temperature": f"{temp}°C",
+                            "VRAM used": f"{vram_gb:.1f} GB",
+                            "VRAM total": f"{vram_total_gb:.0f} GB",
+                            "Name": name,
+                        })
+                    break
 
-        # Hide GPU cards that no longer have data
-        for idx in list(self._gpu_cards.keys()):
-            if idx >= len(gpus):
-                self._gpu_cards[idx].set_visible(False)
-
-        # ── STORAGE ──
-        # Root
+        # ── Storage ──
         root = data.get("storage", {}).get("root", {})
-        if "root" in self._cards and root:
-            c = self._cards["root"]
+        if "root" in self._devices and root:
             used = root.get("used_gb", 0)
             total = root.get("total_gb", 1)
             pct = root.get("used_pct", (used / total * 100) if total > 0 else 0)
             status = "blocked" if pct > 90 else "warn" if pct > 75 else "healthy"
-            c.set_value(f"{pct:.0f}%", f"{used:.0f} / {total:.0f} GB", pct, "Root", status)
-            c.set_status_color(status)
+            self._devices["root"].set_value(f"{pct:.0f}%", status)
+            if self._selected_device == "root":
+                self._detail.update_facts({
+                    "Used": f"{used:.0f} GB",
+                    "Total": f"{total:.0f} GB",
+                    "Percent": f"{pct:.1f}%",
+                })
 
-        # Work
         work = data.get("storage", {}).get("work", {})
-        if "work" in self._cards and work:
-            c = self._cards["work"]
+        if "work" in self._devices and work:
             used = work.get("used_gb", 0)
             total = work.get("total_gb", 1)
             pct = work.get("used_pct", (used / total * 100) if total > 0 else 0)
             status = "blocked" if pct > 90 else "warn" if pct > 75 else "healthy"
-            c.set_value(f"{pct:.0f}%", f"{used:.0f} / {total:.0f} GB", pct, "Work", status)
-            c.set_status_color(status)
+            self._devices["work"].set_value(f"{pct:.0f}%", status)
+            if self._selected_device == "work":
+                self._detail.update_facts({
+                    "Used": f"{used:.0f} GB",
+                    "Total": f"{total:.0f} GB",
+                    "Percent": f"{pct:.1f}%",
+                })
 
-        # NVMe
         nvme = perf.get("nvme", {})
         devices = nvme.get("devices", [])
         total_ops = sum(
@@ -391,12 +432,15 @@ class PerformancePage(Gtk.ScrolledWindow):
             (d.get("writeOps", d.get("writes", 0)) or 0)
             for d in devices
         )
-        if "nvme" in self._cards:
-            c = self._cards["nvme"]
-            c.set_value(f"{total_ops:,}", f"ops · {len(devices)} devices", history=coll.get("nvme"))
-            c.set_status_color("healthy")
+        if "nvme" in self._devices:
+            self._devices["nvme"].set_value(f"{total_ops:,}", "healthy")
+            if self._selected_device == "nvme":
+                self._detail.update_facts({
+                    "Total ops": f"{total_ops:,}",
+                    "Devices": str(len(devices)),
+                })
 
-        # ── NETWORK ──
+        # ── Network ──
         net = perf.get("network", {})
         interfaces = net.get("interfaces", [])
         total_mb = sum(
@@ -404,61 +448,33 @@ class PerformancePage(Gtk.ScrolledWindow):
             (d.get("txMiB", 0) or (d.get("txBytes", 0) or 0) / (1024 * 1024))
             for d in interfaces
         )
-        if "network" in self._cards:
-            c = self._cards["network"]
-            c.set_value(f"{total_mb:.0f} MB", f"{len(interfaces)} interfaces", history=coll.get("network"))
-            c.set_status_color("healthy")
+        if "network" in self._devices:
+            self._devices["network"].set_value(f"{total_mb:.0f} MB", "healthy")
+            if self._selected_device == "network":
+                self._detail.update_facts({
+                    "Total": f"{total_mb:.0f} MB",
+                    "Interfaces": str(len(interfaces)),
+                })
 
-        # ── AGENTS ──
+        # ── Agents ──
         agents = perf.get("agents", {})
         total = agents.get("total", 0)
         abandoned = agents.get("abandoned", 0)
-        if "agents" in self._cards:
-            c = self._cards["agents"]
-            c.set_value(str(total), f"{abandoned} abandoned" if abandoned else "All healthy", history=coll.get("agents"))
-            c.set_status_color("blocked" if abandoned > 5 else "warn" if abandoned > 0 else "healthy")
+        if "agents" in self._devices:
+            status = "blocked" if abandoned > 5 else "warn" if abandoned > 0 else "healthy"
+            self._devices["agents"].set_value(str(total), status)
+            if self._selected_device == "agents":
+                self._detail.update_facts({
+                    "Total": str(total),
+                    "Abandoned": str(abandoned),
+                })
 
         mcp = perf.get("mcp", {})
         mcp_total = mcp.get("total", 0)
-        if "mcp" in self._cards:
-            c = self._cards["mcp"]
-            c.set_value(str(mcp_total), "MCP processes", history=coll.get("mcp"))
-            c.set_status_color("blocked" if mcp_total > 80 else "warn" if mcp_total > 50 else "healthy")
-
-        # ── Detail text ──
-        load5 = cpu.get("load5", 0)
-        load15 = cpu.get("load15", 0)
-        self.cpu_detail.set_label(f"util: {cpu_util:.1f}%  load1: {load1:.1f}  load5: {load5:.1f}  load15: {load15:.1f}")
-
-        gpu_lines = []
-        for i, gpu in enumerate(gpus):
-            name = gpu.get("name", f"GPU {i}")
-            util = gpu.get("utilPct", 0)
-            temp = gpu.get("tempC", 0)
-            vram = gpu.get("vramUsedMiB", 0)
-            vram_total = gpu.get("vramTotalMiB", 0)
-            gpu_lines.append(f"{name}: {util}% · {temp}°C · VRAM {vram}/{vram_total} MiB")
-        self.gpu_detail.set_label("\n".join(gpu_lines) if gpu_lines else "No GPU data")
-
-    @staticmethod
-    def _shorten_gpu_name(name: str) -> str:
-        """Convert verbose GPU names to readable labels."""
-        if not name:
-            return "GPU"
-        # NVIDIA
-        if "RTX 4000 Ada Generation" in name:
-            return "RTX 4000 Ada"
-        if "RTX A4000" in name:
-            return "RTX A4000"
-        # AMD
-        if "RX 6900 XT" in name:
-            return "RX 6900 XT"
-        if "W5700X" in name:
-            return "W5700X"
-        if "Radeon Pro" in name:
-            # Extract model after "Radeon Pro"
-            parts = name.split("Radeon Pro ")
-            if len(parts) > 1:
-                return f"Radeon Pro {parts[1].split()[0]}"
-        # Fallback: first 20 chars
-        return name if len(name) <= 24 else name[:21] + "..."
+        if "mcp" in self._devices:
+            status = "blocked" if mcp_total > 80 else "warn" if mcp_total > 50 else "healthy"
+            self._devices["mcp"].set_value(str(mcp_total), status)
+            if self._selected_device == "mcp":
+                self._detail.update_facts({
+                    "Total": str(mcp_total),
+                })
