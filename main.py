@@ -43,6 +43,7 @@ from widgets.voice_actions_page import VoiceActionsPage
 from widgets.content_business_page import ContentBusinessPage
 from widgets.receipts_proof_page import ReceiptsProofPage
 from widgets.storage_hygiene_page import StorageHygienePage
+from widgets.rcc_command_page import RCCCommandPage
 from services.alert_manager import get_alert_manager
 from services.ollama_control import get_ollama_control, OllamaAction, ActionResult
 from services.profile_config import load_profile, profile_allows_page
@@ -446,6 +447,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.navigation.add_page("gpus", "GPUs", self.gpus_page, "video-display-symbolic")
         else:
             self.gpus_page = None
+
+        # RCC Command Kernel — canonical command surface
+        self.rcc_page = RCCCommandPage()
+        self.navigation.add_page("rcc", "RCC Commands", self.rcc_page, "applications-system-symbolic")
 
         # Roxy Status
         if self._page_allowed("roxy_status"):

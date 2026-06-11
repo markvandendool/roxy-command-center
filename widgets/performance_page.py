@@ -235,9 +235,6 @@ class PerformancePage(Gtk.Box):
         self._add_device("agents", "Agents", "applications-games-symbolic", (0.96, 0.62, 0.04))
         self._add_device("mcp", "MCP", "preferences-system-symbolic", (0.48, 0.23, 0.93))
 
-        # Select first device
-        self._select_device("cpu")
-
         # ── CENTER+RIGHT: Detail view ──
         self._detail = DeviceDetailView()
         self._detail.set_hexpand(True)
@@ -245,6 +242,9 @@ class PerformancePage(Gtk.Box):
 
         # Add CSS for selection
         self._setup_css()
+
+        # Select first device after the detail view exists.
+        self._select_device("cpu")
 
     def _setup_css(self):
         css = """
@@ -299,8 +299,18 @@ class PerformancePage(Gtk.Box):
 
         meta = self._device_meta.get(device_id, {})
         coll = get_collector()
-        history = coll.get(device_id, [])
+        history = coll.get(self._collector_metric(device_id))
         self._detail.show_device(device_id, meta.get("name", device_id), history, {}, meta.get("color"))
+
+    def _collector_metric(self, device_id: str) -> str:
+        """Map UI device ids onto TelemetryCollector metric keys."""
+        return {
+            "gpu_ada": "gpu0",
+            "gpu_w5700x": "gpu1",
+            "gpu_6900xt": "gpu2",
+            "root": "nvme",
+            "work": "nvme",
+        }.get(device_id, device_id)
 
     def update(self, data: dict):
         perf = data.get("performance") or {}
