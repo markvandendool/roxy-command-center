@@ -9,6 +9,7 @@ Never routes arbitrary shell, systemd mutation, or secrets.
 import json
 import urllib.request
 import urllib.error
+from datetime import datetime
 from typing import Dict, Any, Optional
 
 OPERATOR_KERNEL_GATEWAY_URL = "http://127.0.0.1:9135/api/operator/kernel/action"
@@ -69,13 +70,32 @@ def build_action_packet(
     }
     if shell_meta:
         shell.update(shell_meta)
+    timestamp = datetime.now().isoformat()
     return {
+        # Existing Operator Kernel wire shape.
         "actionId": action_id,
         "actionType": action_type,
         "version": "1.0.0",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": timestamp,
         "shell": shell,
         "payload": payload or {},
+        # Compatibility aliases for local smoke tests and older callers. These
+        # are stripped before the packet is POSTed to the gateway.
+        "id": action_id,
+        "action": action_type,
+        "requestedAt": timestamp,
+    }
+
+
+def _gateway_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
+    """Return only the existing Operator Kernel gateway fields."""
+    return {
+        "actionId": packet["actionId"],
+        "actionType": packet["actionType"],
+        "version": packet["version"],
+        "timestamp": packet["timestamp"],
+        "shell": packet["shell"],
+        "payload": packet["payload"],
     }
 
 
@@ -93,7 +113,7 @@ def send_action_packet(
         raise ValueError(f"Action '{action_type}' is not in the safe V1 catalog")
 
     packet = build_action_packet(action_type, payload, shell_meta)
-    body = json.dumps(packet).encode("utf-8")
+    body = json.dumps(_gateway_packet(packet)).encode("utf-8")
 
     req = urllib.request.Request(
         OPERATOR_KERNEL_GATEWAY_URL,
@@ -140,7 +160,6 @@ def request_receipt(
 
 if __name__ == "__main__":
     # Smoke test — call a safe T0 action
-    from datetime import datetime
     print("[OK-Client] Smoke test: kernel.state.get")
     result = send_action_packet("kernel.state.get")
     print(json.dumps(result, indent=2, default=str))

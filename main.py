@@ -24,7 +24,6 @@ from daemon_client import DaemonClient, normalize_status
 from ui.header_bar import HeaderBar
 from ui.navigation import MainNavigation
 from ui.settings import SettingsPage
-from widgets.home_console_page import HomeConsolePage
 from widgets.mission_dashboard_page import MissionDashboardPage
 from widgets.orchestrator_panel import OrchestratorPanel
 from widgets.overview_page import OverviewPage
@@ -46,6 +45,7 @@ from widgets.receipts_proof_page import ReceiptsProofPage
 from widgets.storage_hygiene_page import StorageHygienePage
 from services.alert_manager import get_alert_manager
 from services.ollama_control import get_ollama_control, OllamaAction, ActionResult
+from services.profile_config import load_profile, profile_allows_page
 from services.telemetry_collector import get_collector
 
 APP_ID = "org.roxy.CommandCenter.Phase2CReview"
@@ -239,9 +239,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.app = app
         self.add_css_class("roxy-command-center")
         print("[MainWindow] Window class initialized")
+
+        self.profile = load_profile()
+        print(f"[MainWindow] Active profile: {self.profile.get('profileId')}")
         
         # Window properties
-        self.set_title("Roxy Command Center")
+        self.set_title(self.profile.get("displayName") or "Roxy Command Center")
         self.set_default_size(1280, 800)
         self.set_size_request(800, 600)
         print("[MainWindow] Window properties set")
@@ -295,10 +298,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.header = HeaderBar(
             on_settings=self._show_settings
         )
+        if hasattr(self.header, "title_label"):
+            self.header.title_label.set_label(self.profile.get("displayName") or "Roxy Command Center")
+        self._set_profile_header()
         main_box.append(self.header.get_widget())
         
         # Navigation + content
-        self.navigation = MainNavigation()
+        visible_pages = None
+        enabled_pages = self.profile.get("enabledPages") or []
+        if enabled_pages:
+            visible_pages = set(enabled_pages)
+        self.navigation = MainNavigation(visible_pages=visible_pages)
         self.navigation.set_vexpand(True)
         main_box.append(self.navigation)
         
@@ -308,104 +318,180 @@ class MainWindow(Adw.ApplicationWindow):
         
         # Civilization OS opens on Mission Dashboard so the operator sees
         # institutional state first; Chat remains available for natural talk.
-        start_page = os.getenv("ROXY_CC_START_PAGE", "missions")
+        start_page = os.getenv("ROXY_CC_START_PAGE", self._default_start_page())
+        if not self._page_allowed(start_page):
+            start_page = self._default_start_page()
         self.navigation.navigate_to(start_page)
+
+    def _page_allowed(self, page_id: str) -> bool:
+        return profile_allows_page(self.profile, page_id)
+
+    def _default_start_page(self) -> str:
+        enabled = self.profile.get("enabledPages") or []
+        return enabled[0] if enabled else "missions"
+
+    def _set_profile_header(self):
+        source = "true" if self.profile.get("sourceAuthority") is True else "false"
+        label = self.profile.get("modeLabel") or self.profile.get("profileId") or "LOCAL"
+        self.header.set_subtitle(f"{label} | sourceAuthority={source}")
     
     def _setup_pages(self):
         """Set up navigation pages — LifePanel layout."""
         # Mission Dashboard — the new civilization command center (default)
-        self.missions_page = MissionDashboardPage(
-            on_navigate=self._on_navigate,
-            on_chat=self._on_quick_chat
-        )
-        self.navigation.add_page("missions", "Missions", self.missions_page, "target-symbolic")
+        if self._page_allowed("missions"):
+            self.missions_page = MissionDashboardPage(
+                on_navigate=self._on_navigate,
+                on_chat=self._on_quick_chat
+            )
+            self.navigation.add_page("missions", "Missions", self.missions_page, "target-symbolic")
+        else:
+            self.missions_page = None
 
         # Orchestrator — pending actions, queued jobs, recent outcomes
-        self.orchestrator_page = OrchestratorPanel()
-        self.navigation.add_page("orchestrator", "Orchestrator", self.orchestrator_page, "system-run-symbolic")
+        if self._page_allowed("orchestrator"):
+            self.orchestrator_page = OrchestratorPanel()
+            self.navigation.add_page("orchestrator", "Orchestrator", self.orchestrator_page, "system-run-symbolic")
+        else:
+            self.orchestrator_page = None
 
         # Home Console — lazy, because it owns chat connection setup and review
         # build triage placeholders.
         self.home_page = None
-        self.navigation.add_lazy_page("home", "Chat", self._build_home_page, "go-home-symbolic")
+        if self._page_allowed("home"):
+            self.navigation.add_lazy_page("home", "Chat", self._build_home_page, "go-home-symbolic")
         
         # Overview — LifePanel home
-        self.overview_page = OverviewPage(on_navigate=self._on_navigate)
-        self.navigation.add_page("overview", "Overview", self.overview_page, "view-grid-symbolic")
+        if self._page_allowed("overview"):
+            self.overview_page = OverviewPage(on_navigate=self._on_navigate)
+            self.navigation.add_page("overview", "Overview", self.overview_page, "view-grid-symbolic")
+        else:
+            self.overview_page = None
         
         # Performance
-        self.performance_page = PerformancePage()
-        self.navigation.add_page("performance", "Performance", self.performance_page, "preferences-system-symbolic")
+        if self._page_allowed("performance"):
+            self.performance_page = PerformancePage()
+            self.navigation.add_page("performance", "Performance", self.performance_page, "preferences-system-symbolic")
+        else:
+            self.performance_page = None
         
         # Apps
-        self.apps_page = AppsPage()
-        self.navigation.add_page("apps", "Apps", self.apps_page, "applications-utilities-symbolic")
+        if self._page_allowed("apps"):
+            self.apps_page = AppsPage()
+            self.navigation.add_page("apps", "Apps", self.apps_page, "applications-utilities-symbolic")
+        else:
+            self.apps_page = None
         
         # Agents
-        self.agents_page = AgentsPage()
-        self.navigation.add_page("agents", "Agents", self.agents_page, "applications-games-symbolic")
+        if self._page_allowed("agents"):
+            self.agents_page = AgentsPage()
+            self.navigation.add_page("agents", "Agents", self.agents_page, "applications-games-symbolic")
+        else:
+            self.agents_page = None
         
         # Brain
-        self.brain_page = BrainPage()
-        self.navigation.add_page("brain", "Brain", self.brain_page, "preferences-system-symbolic")
+        if self._page_allowed("brain"):
+            self.brain_page = BrainPage()
+            self.navigation.add_page("brain", "Brain", self.brain_page, "preferences-system-symbolic")
+        else:
+            self.brain_page = None
         
         # Executive
-        self.executive_page = ExecutivePage()
-        self.navigation.add_page("executive", "Executive", self.executive_page, "emblem-ok-symbolic")
+        if self._page_allowed("executive"):
+            self.executive_page = ExecutivePage()
+            self.navigation.add_page("executive", "Executive", self.executive_page, "emblem-ok-symbolic")
+        else:
+            self.executive_page = None
         
         # Voice / Actions
-        self.voice_actions_page = VoiceActionsPage()
-        self.navigation.add_page("voice_actions", "Voice / Actions", self.voice_actions_page, "audio-input-microphone-symbolic")
+        if self._page_allowed("voice_actions"):
+            self.voice_actions_page = VoiceActionsPage()
+            self.navigation.add_page("voice_actions", "Voice / Actions", self.voice_actions_page, "audio-input-microphone-symbolic")
+        else:
+            self.voice_actions_page = None
         
         # Content
-        self.content_page = ContentBusinessPage()
-        self.navigation.add_page("content", "Content", self.content_page, "folder-music-symbolic")
+        if self._page_allowed("content"):
+            self.content_page = ContentBusinessPage()
+            self.navigation.add_page("content", "Content", self.content_page, "folder-music-symbolic")
+        else:
+            self.content_page = None
         
         # Receipts / Proof
-        self.receipts_page = ReceiptsProofPage()
-        self.navigation.add_page("receipts", "Receipts", self.receipts_page, "emblem-ok-symbolic")
+        if self._page_allowed("receipts"):
+            self.receipts_page = ReceiptsProofPage()
+            self.navigation.add_page("receipts", "Receipts", self.receipts_page, "emblem-ok-symbolic")
+        else:
+            self.receipts_page = None
         
         # Storage / Hygiene
-        self.storage_page = StorageHygienePage()
-        self.navigation.add_page("storage", "Storage", self.storage_page, "drive-harddisk-symbolic")
+        if self._page_allowed("storage"):
+            self.storage_page = StorageHygienePage()
+            self.navigation.add_page("storage", "Storage", self.storage_page, "drive-harddisk-symbolic")
+        else:
+            self.storage_page = None
         
         # Services
-        self.services_page = ServicesPage()
-        self.navigation.add_page("services", "Services", self.services_page, "system-run-symbolic")
+        if self._page_allowed("services"):
+            self.services_page = ServicesPage()
+            self.navigation.add_page("services", "Services", self.services_page, "system-run-symbolic")
+        else:
+            self.services_page = None
         
         # GPUs
-        self.gpus_page = GpusPage()
-        self.navigation.add_page("gpus", "GPUs", self.gpus_page, "video-display-symbolic")
+        if self._page_allowed("gpus"):
+            self.gpus_page = GpusPage()
+            self.navigation.add_page("gpus", "GPUs", self.gpus_page, "video-display-symbolic")
+        else:
+            self.gpus_page = None
 
         # Roxy Status
-        self.roxy_status_page = RoxyStatusPage()
-        self.navigation.add_page("roxy_status", "Roxy Status", self.roxy_status_page, "emblem-ok-symbolic")
+        if self._page_allowed("roxy_status"):
+            self.roxy_status_page = RoxyStatusPage()
+            self.navigation.add_page("roxy_status", "Roxy Status", self.roxy_status_page, "emblem-ok-symbolic")
+        else:
+            self.roxy_status_page = None
 
         # MOS Cockpit
-        self.mos_cockpit_page = MOSCockpitPage()
-        self.navigation.add_page("mos_cockpit", "MOS Cockpit", self.mos_cockpit_page, "network-workgroup-symbolic")
+        if self._page_allowed("mos_cockpit"):
+            self.mos_cockpit_page = MOSCockpitPage()
+            self.navigation.add_page("mos_cockpit", "MOS Cockpit", self.mos_cockpit_page, "network-workgroup-symbolic")
+        else:
+            self.mos_cockpit_page = None
         
         # Ollama
-        self.ollama_page = OllamaPanel(
-            on_model_unload=self._on_ollama_unload,
-            on_refresh=self._fetch_data
-        )
-        self.navigation.add_page("ollama", "Ollama", self.ollama_page, "face-smile-big-symbolic")
+        if self._page_allowed("ollama"):
+            self.ollama_page = OllamaPanel(
+                on_model_unload=self._on_ollama_unload,
+                on_refresh=self._fetch_data
+            )
+            self.navigation.add_page("ollama", "Ollama", self.ollama_page, "face-smile-big-symbolic")
+        else:
+            self.ollama_page = None
         
         # Alerts
-        self.alerts_page = AlertPanel()
-        self.navigation.add_page("alerts", "Alerts", self.alerts_page, "dialog-warning-symbolic")
+        if self._page_allowed("alerts"):
+            self.alerts_page = AlertPanel()
+            self.navigation.add_page("alerts", "Alerts", self.alerts_page, "dialog-warning-symbolic")
+        else:
+            self.alerts_page = None
         
         # Terminal
-        self.terminal_page = TerminalPage()
-        self.navigation.add_page("terminal", "Terminal", self.terminal_page, "utilities-terminal-symbolic")
+        if self._page_allowed("terminal"):
+            self.terminal_page = TerminalPage()
+            self.navigation.add_page("terminal", "Terminal", self.terminal_page, "utilities-terminal-symbolic")
+        else:
+            self.terminal_page = None
         
         # Settings
-        self.settings_page = SettingsPage(on_setting_changed=self._on_setting_changed)
-        self.navigation.add_page("settings", "Settings", self.settings_page, "emblem-system-symbolic")
+        if self._page_allowed("settings"):
+            self.settings_page = SettingsPage(on_setting_changed=self._on_setting_changed)
+            self.navigation.add_page("settings", "Settings", self.settings_page, "emblem-system-symbolic")
+        else:
+            self.settings_page = None
 
     def _build_home_page(self):
         """Build the operator chat page on demand."""
+        from widgets.home_console_page import HomeConsolePage
         self.home_page = HomeConsolePage(on_navigate=self._on_navigate)
         return self.home_page
 
@@ -456,6 +542,7 @@ class MainWindow(Adw.ApplicationWindow):
             "alerts": self.alerts_page,
             "terminal": self.terminal_page,
         }
+        page_map = {key: page for key, page in page_map.items() if page is not None}
         if visible_name == "missions" and self.missions_page is not None:
             self.missions_page.update(data)
         elif visible_name == "home" and self.home_page is not None:
@@ -543,6 +630,8 @@ class MainWindow(Adw.ApplicationWindow):
             # If compact, still respect start page preference
             if self._compact_mode:
                 start_page = os.getenv("ROXY_CC_START_PAGE", "home")
+                if not self._page_allowed(start_page):
+                    start_page = self._default_start_page()
                 print(f"[MainWindow] Compact mode: navigating to {start_page}")
                 GLib.idle_add(lambda: self.navigation.navigate_to(start_page) or False)
     
@@ -576,6 +665,7 @@ class MainWindow(Adw.ApplicationWindow):
                 mode = data.get("mode", "local")
                 host = raw_data.get("remote_host", "")
                 self.header.set_mode(mode, host)
+                self._set_profile_header()
                 
                 # Update header debug strip
                 cpu_pct = data.get("cpu", {}).get("cpu_pct", 0)
@@ -600,7 +690,8 @@ class MainWindow(Adw.ApplicationWindow):
         """
         # Overview always updates (it's the LifePanel summary dashboard)
         # It self-throttles sparkline redraws when not visible
-        self.overview_page.update(data)
+        if self.overview_page is not None:
+            self.overview_page.update(data)
         
         # Home page is lazy. Only update it after the operator explicitly opens it.
         if self.home_page is not None:

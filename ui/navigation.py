@@ -8,7 +8,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Callable, Iterable
 
 
 class NavigationSidebar(Gtk.Box):
@@ -22,12 +22,17 @@ class NavigationSidebar(Gtk.Box):
     - Badge support for alerts
     """
     
-    def __init__(self, on_navigate: Optional[Callable[[str], None]] = None):
+    def __init__(
+        self,
+        on_navigate: Optional[Callable[[str], None]] = None,
+        visible_pages: Optional[Iterable[str]] = None
+    ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.add_css_class("navigation-sidebar")
         self.set_size_request(200, -1)
         
         self.on_navigate = on_navigate
+        self._visible_pages = set(visible_pages) if visible_pages else None
         self._buttons: Dict[str, Gtk.ToggleButton] = {}
         self._current_page = ""
         
@@ -66,6 +71,8 @@ class NavigationSidebar(Gtk.Box):
         ]
         
         for page_id, icon_name, label in nav_items:
+            if self._visible_pages is not None and page_id not in self._visible_pages:
+                continue
             btn = self._create_nav_button(page_id, icon_name, label)
             main_section.append(btn)
         
@@ -76,8 +83,9 @@ class NavigationSidebar(Gtk.Box):
         main_section.append(sep)
         
         # Settings at bottom
-        settings_btn = self._create_nav_button("settings", "emblem-system-symbolic", "Settings")
-        main_section.append(settings_btn)
+        if self._visible_pages is None or "settings" in self._visible_pages:
+            settings_btn = self._create_nav_button("settings", "emblem-system-symbolic", "Settings")
+            main_section.append(settings_btn)
         
         # Footer with version
         footer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -169,14 +177,14 @@ class NavigationView:
     with back button support.
     """
     
-    def __init__(self):
+    def __init__(self, visible_pages: Optional[Iterable[str]] = None):
         self._widget = Adw.NavigationView()
         self._pages: Dict[str, Adw.NavigationPage] = {}
     
     def get_widget(self):
         return self._widget
     
-    def add_page(self, page_id: str, title: str, widget: Gtk.Widget) -> Adw.NavigationPage:
+    def add_page(self, page_id: str, title: str, widget: Gtk.Widget):
         """Add a page to the navigation view."""
         page = Adw.NavigationPage.new(widget, title)
         page.set_tag(page_id)
@@ -241,7 +249,10 @@ class MainNavigation(Gtk.Box):
         self.add_css_class("main-navigation")
         
         # Sidebar
-        self.sidebar = NavigationSidebar(on_navigate=self._on_sidebar_navigate)
+        self.sidebar = NavigationSidebar(
+            on_navigate=self._on_sidebar_navigate,
+            visible_pages=visible_pages,
+        )
         self.append(self.sidebar)
         
         # Separator
