@@ -244,7 +244,7 @@ class MainNavigation(Gtk.Box):
     the sidebar with a content stack.
     """
     
-    def __init__(self):
+    def __init__(self, visible_pages: Optional[Iterable[str]] = None):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.add_css_class("main-navigation")
         
