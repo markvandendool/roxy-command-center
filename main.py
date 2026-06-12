@@ -50,6 +50,9 @@ from services.telemetry_collector import get_collector
 
 APP_ID = "org.roxy.CommandCenter.Phase2CReview"
 CSS_PATH = Path(__file__).parent / "styles" / "custom.css"
+APP_FLAGS = getattr(Gio.ApplicationFlags, "DEFAULT_FLAGS", None)
+if APP_FLAGS is None:
+    APP_FLAGS = Gio.ApplicationFlags.FLAGS_NONE
 
 
 class RoxyCommandCenter(Adw.Application):
@@ -58,7 +61,7 @@ class RoxyCommandCenter(Adw.Application):
     def __init__(self):
         super().__init__(
             application_id=APP_ID,
-            flags=Gio.ApplicationFlags.DEFAULT_FLAGS
+            flags=APP_FLAGS
         )
         self.window: Optional['MainWindow'] = None
         self._signal_handler_ids: List[int] = []
