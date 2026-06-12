@@ -12,8 +12,7 @@
     "services",
     "roxy_status",
     "mos_cockpit",
-    "alerts",
-    "settings"
+    "alerts"
   ],
   "disabledPages": [
     "missions",
@@ -29,7 +28,8 @@
     "storage",
     "gpus",
     "ollama",
-    "terminal"
+    "terminal",
+    "settings"
   ],
   "forbiddenActions": [
     "arbitrary_shell",
