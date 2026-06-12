@@ -45,7 +45,6 @@ services
 roxy_status
 mos_cockpit
 alerts
-settings
 ```
 
 It disables pages that can mutate state or expose raw execution:
