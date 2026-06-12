@@ -1,0 +1,60 @@
+{
+  "profileId": "friday-citadel-worker-1",
+  "displayName": "Friday / citadel-worker-1",
+  "modeLabel": "FRIDAY READ-ONLY",
+  "sourceAuthority": false,
+  "repoRoot": "/home/mark/mindsong-juke-hub",
+  "rccCli": "/home/mark/mindsong-juke-hub/scripts/rcc/rcc.mjs",
+  "statusCommand": "/home/mark/bin/rcc-status",
+  "enabledPages": [
+    "overview",
+    "receipts",
+    "services",
+    "roxy_status",
+    "mos_cockpit",
+    "alerts",
+    "settings"
+  ],
+  "disabledPages": [
+    "missions",
+    "orchestrator",
+    "home",
+    "performance",
+    "apps",
+    "agents",
+    "brain",
+    "executive",
+    "voice_actions",
+    "content",
+    "storage",
+    "gpus",
+    "ollama",
+    "terminal"
+  ],
+  "forbiddenActions": [
+    "arbitrary_shell",
+    "service_restart",
+    "service_stop",
+    "service_start",
+    "git_commit",
+    "git_push",
+    "source_write",
+    "secret_read"
+  ],
+  "allowedRccCommands": [
+    "roxy.status",
+    "roxy.resources",
+    "roxy.models",
+    "agent.agents",
+    "proof.doctor",
+    "proof.receipts",
+    "fleet.status",
+    "fleet.blockers",
+    "fleet.agents",
+    "fleet.receipts",
+    "memory.today",
+    "memory.recent",
+    "factory.status",
+    "factory.routes"
+  ]
+}
