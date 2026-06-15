@@ -64,20 +64,47 @@ class ReceiptsProofPage(Gtk.ScrolledWindow):
         return {}
 
     def _read_receipts(self) -> list:
+        receipts = []
         try:
             path = Path("/mnt/work/ssot/mindsong-juke-hub/output/regent/action-receipts.ndjson")
-            if not path.exists():
-                return []
-            lines = path.read_text().strip().splitlines()
-            receipts = []
-            for line in lines[-15:]:
-                try:
-                    receipts.append(json.loads(line))
-                except Exception:
-                    pass
-            return list(reversed(receipts))
+            if path.exists():
+                lines = path.read_text().strip().splitlines()
+                for line in lines[-15:]:
+                    try:
+                        receipts.append(json.loads(line))
+                    except Exception:
+                        pass
         except Exception:
-            return []
+            pass
+
+        # Also read RCC receipts
+        try:
+            rcc_root = Path("/mnt/work/ssot/mindsong-juke-hub/output/rcc/receipts")
+            if rcc_root.exists():
+                for cmd_dir in rcc_root.iterdir():
+                    if not cmd_dir.is_dir():
+                        continue
+                    files = sorted(cmd_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]
+                    for f in files:
+                        try:
+                            data = json.loads(f.read_text())
+                            receipts.append({
+                                "schemaVersion": "rcc-receipt.v1",
+                                "action": data.get("commandId", "unknown"),
+                                "source": "rcc-command-kernel",
+                                "requestedAt": data.get("finishedAt", ""),
+                                "status": data.get("result", {}).get("verdict", "unknown").lower(),
+                                "receiptPath": str(f),
+                                "payload": data.get("result", {}),
+                            })
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # Sort by time, newest first
+        receipts.sort(key=lambda r: r.get("requestedAt", ""), reverse=True)
+        return receipts[:30]
 
     def update(self, data: dict):
         # Proof debt

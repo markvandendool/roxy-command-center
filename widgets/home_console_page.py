@@ -1448,6 +1448,26 @@ class TalkColumn(Gtk.Box):
         """Take one local status snapshot; no background polling in review build."""
         self._info_fetch_pending = False  # Guard against concurrent fetches
         GLib.idle_add(self._poll_info)
+
+    def _start_lane_health_polling(self):
+        """Take one lane-health snapshot; no background polling in review build."""
+        GLib.idle_add(self._poll_lane_health)
+
+    def _poll_lane_health(self) -> bool:
+        """Fetch canonical lane health and update the lane selector tooltip."""
+        try:
+            health = self._chat_service.get_lane_health()
+            if health and self._current_lane_label:
+                parts = []
+                for key, info in health.items():
+                    status = info.get("status", "?")
+                    truth = info.get("truthGrade", "?")
+                    parts.append(f"{key}: {status}/{truth}")
+                tooltip = "Lane health:\n" + "\n".join(parts)
+                self._lane_dropdown.set_tooltip_text(tooltip)
+        except Exception as exc:
+            print(f"[Talk] Lane health snapshot failed: {exc}")
+        return False
     
     def _poll_info(self) -> bool:
         """Fetch ROXY harness health and update Truth Panel chips."""

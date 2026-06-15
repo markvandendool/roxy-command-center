@@ -284,7 +284,39 @@ class MainNavigation(Gtk.Box):
         # Check if lazy page needs building
         if page_id in self._page_builders:
             builder = self._page_builders.pop(page_id)
-            widget = builder()
+            try:
+                widget = builder()
+            except Exception as exc:
+                # Render a visible error page instead of a silent black placeholder.
+                import traceback
+                widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+                widget.set_margin_top(24)
+                widget.set_margin_start(24)
+                widget.set_margin_end(24)
+                widget.set_margin_bottom(24)
+
+                title = Gtk.Label(label=f"⚠️ {page_id.title()} page failed to load")
+                title.add_css_class("title-2")
+                title.set_xalign(0)
+                widget.append(title)
+
+                detail = Gtk.Label(label=str(exc))
+                detail.add_css_class("error")
+                detail.set_xalign(0)
+                detail.set_wrap(True)
+                detail.set_selectable(True)
+                widget.append(detail)
+
+                trace = Gtk.TextView()
+                trace.set_editable(False)
+                trace.get_buffer().set_text(traceback.format_exc())
+                scrolled = Gtk.ScrolledWindow()
+                scrolled.set_vexpand(True)
+                scrolled.set_child(trace)
+                widget.append(scrolled)
+
+                print(f"[MainNavigation] Page {page_id!r} build failed: {exc}")
+                traceback.print_exc()
             
             # Replace placeholder
             placeholder = self.stack._pages.get(page_id)
