@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import subprocess
@@ -54,7 +55,7 @@ def check_ollama() -> dict:
         return {"ok": False, "url": url, "error": str(exc)}
 
 
-def main() -> int:
+def build_report(strict: bool = False) -> dict:
     docker_info = run(["docker", "info", "--format", "{{.DockerRootDir}}"], timeout=8.0)
     report = {
         "python": {
@@ -74,22 +75,29 @@ def main() -> int:
 
     # findmnt returns nonzero when the unsafe volume is absent, which is desired.
     report["roxy_safety_not_mounted"] = {"ok": not report["roxy_safety_mount"].get("ok", False)}
+    report["degraded"] = not report["ollama_api"]["ok"]
+    report["warnings"] = []
+    if report["degraded"]:
+        report["warnings"].append("ollama_api unavailable; GTK app should launch in degraded mode.")
 
-    checks = [
+    critical_checks = [
         report["python"]["ok"],
         report["gtk_libadwaita_soup"]["ok"],
-        report["ollama_api"]["ok"],
         report["roxy_law0"]["ok"],
         report["roxy_external_guard"]["ok"],
         report["work_mount"]["ok"],
         report["docker_root"]["ok"] and "/mnt/work/containers/docker" in report["docker_root"].get("stdout", ""),
         report["roxy_safety_not_mounted"]["ok"],
     ]
-    report["ok"] = all(checks)
+    report["critical_ok"] = all(critical_checks)
+    report["ok"] = report["critical_ok"] and (report["ollama_api"]["ok"] if strict else True)
 
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0 if report["ok"] else 1
+    return report
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--strict", action="store_true", help="Fail when optional runtime services are unavailable.")
+    args, _ = parser.parse_known_args()
+    raise SystemExit(0 if build_report(strict=args.strict)["ok"] else 1)

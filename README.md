@@ -18,7 +18,7 @@ GTK4/Libadwaita desktop application for ROXY AI workstation monitoring and contr
 
 - Python 3.8+
 - GTK4 & Libadwaita (`python3-gi`, `gir1.2-adw-1`)
-- Current ROXY runtime with `ollama.service` on `127.0.0.1:11434`
+- Current ROXY runtime; `ollama.service` on `127.0.0.1:11434` unlocks the full model panel, but the GTK app can still launch in degraded mode when it is down
 
 ## Installation
 
