@@ -449,6 +449,8 @@ class AgentsPage(Gtk.ScrolledWindow):
         GLib.idle_add(do_scan)
     
     def _on_auto_refresh(self):
+        if not self.get_mapped():
+            return True
         self._packets = self._discovery.scan()
         self._update_summary()
         self._refresh_cards()

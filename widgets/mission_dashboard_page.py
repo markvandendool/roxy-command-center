@@ -912,6 +912,8 @@ class MissionDashboardPage(Gtk.Box):
 
     def _auto_refresh(self):
         """Reload missions and lanes from canonical sources."""
+        if not self.get_mapped():
+            return True
         # Clear missions
         while self._mission_flow.get_first_child():
             self._mission_flow.remove(self._mission_flow.get_first_child())
@@ -927,5 +929,7 @@ class MissionDashboardPage(Gtk.Box):
 
     def update(self, data: dict):
         """Update from daemon data."""
+        if not self.get_mapped():
+            return
         self._agent_panel.update(data)
         self._apex_panel.update(data)

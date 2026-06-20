@@ -13,7 +13,7 @@ import urllib.request
 import shutil
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor
 import gi
 gi.require_version('Gtk', '4.0')
@@ -53,6 +53,7 @@ class DaemonClient:
         self.timeout = timeout
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="daemon")
         self._cache: Optional[DaemonResponse] = None
+        self._probe_cache: Dict[str, Tuple[float, Any]] = {}
         self._pending = False
         self._callbacks: list = []
         
@@ -60,6 +61,16 @@ class DaemonClient:
         self.mode = "auto"
         self.remote_host = "10.0.0.69"
         self.remote_port = 8766
+
+    def _cached(self, key: str, ttl: float, producer: Callable[[], Any]) -> Any:
+        """Return a cached probe result when it is still fresh."""
+        now = time.time()
+        cached = self._probe_cache.get(key)
+        if cached and now - cached[0] <= ttl:
+            return cached[1]
+        value = producer()
+        self._probe_cache[key] = (now, value)
+        return value
     
     def configure(self, mode: str = "auto", remote_host: str = "10.0.0.69", remote_port: int = 8766):
         """Update daemon connection configuration."""
@@ -189,8 +200,12 @@ class DaemonClient:
         except Exception as exc:
             return False, str(exc)
 
+    def _run_text_cached(self, command: list[str], timeout: float = 2.0, ttl: float = 15.0) -> tuple[bool, str]:
+        key = "cmd:" + "\0".join(command)
+        return self._cached(key, ttl, lambda: self._run_text(command, timeout=timeout))
+
     def _failed_unit_count(self) -> int:
-        ok, output = self._run_text(["systemctl", "--failed", "--no-legend", "--no-pager"], timeout=3.0)
+        ok, output = self._run_text_cached(["systemctl", "--failed", "--no-legend", "--no-pager"], timeout=3.0, ttl=30.0)
         if not ok or not output:
             return 0
         return len([line for line in output.splitlines() if line.strip()])
@@ -261,6 +276,9 @@ class DaemonClient:
             return {"mount": path, "error": str(exc), "used_pct": 0.0}
 
     def _temperature_summary(self) -> dict:
+        return self._cached("temperature_summary", 10.0, self._temperature_summary_uncached)
+
+    def _temperature_summary_uncached(self) -> dict:
         temps: dict[str, float] = {}
         for hwmon in Path("/sys/class/hwmon").glob("hwmon*"):
             try:
@@ -292,7 +310,7 @@ class DaemonClient:
         }
 
     def _external_state(self) -> dict:
-        findmnt_ok, mounted = self._run_text(["findmnt", "-rn"], timeout=3.0)
+        findmnt_ok, mounted = self._run_text_cached(["findmnt", "-rn"], timeout=3.0, ttl=30.0)
         text = mounted if findmnt_ok else ""
         return {
             "p51_visible": "P51_GDRIVE_CLONE" in text,
@@ -301,6 +319,9 @@ class DaemonClient:
         }
 
     def _active_workloads(self) -> dict:
+        return self._cached("active_workloads", 15.0, self._active_workloads_uncached)
+
+    def _active_workloads_uncached(self) -> dict:
         ollama_ok, ollama_ps = self._run_text(["ollama", "ps"], timeout=3.0)
         docker_ok, docker_ps = self._run_text(
             ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}"],
@@ -314,6 +335,9 @@ class DaemonClient:
         }
 
     def _service_state(self, service: str) -> dict:
+        return self._cached(f"service_state:{service}", 15.0, lambda: self._service_state_uncached(service))
+
+    def _service_state_uncached(self, service: str) -> dict:
         active_ok, active = self._run_text(["systemctl", "is-active", service])
         enabled_ok, enabled = self._run_text(["systemctl", "is-enabled", service])
         return {
@@ -325,6 +349,9 @@ class DaemonClient:
         }
 
     def _ollama_models(self) -> tuple[bool, list[dict], str]:
+        return self._cached("ollama_models", 30.0, self._ollama_models_uncached)
+
+    def _ollama_models_uncached(self) -> tuple[bool, list[dict], str]:
         try:
             with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=2.0) as resp:
                 payload = json.loads(resp.read().decode())
@@ -352,6 +379,9 @@ class DaemonClient:
 
     def _qdrant_info(self) -> dict:
         """Query Qdrant for live vector store stats."""
+        return self._cached("qdrant_info", 30.0, self._qdrant_info_uncached)
+
+    def _qdrant_info_uncached(self) -> dict:
         try:
             req = urllib.request.Request(
                 "http://127.0.0.1:3002/collections/mindsong-brain-v1",
@@ -372,6 +402,9 @@ class DaemonClient:
 
     def _proxy_health(self) -> dict:
         """Query roxy-chat-proxy health without triggering model generation."""
+        return self._cached("proxy_health", 15.0, self._proxy_health_uncached)
+
+    def _proxy_health_uncached(self) -> dict:
         try:
             req = urllib.request.Request(
                 "http://127.0.0.1:4001/health",
@@ -393,6 +426,33 @@ class DaemonClient:
             }
         except Exception as e:
             return {"reachable": False, "error": str(e)[:120]}
+
+    def _gpu_snapshot(self) -> list[dict]:
+        """Return live GPU data with a short cache to avoid expensive helper churn."""
+        return self._cached("gpu_snapshot", 5.0, self._gpu_snapshot_uncached)
+
+    def _gpu_snapshot_uncached(self) -> list[dict]:
+        try:
+            gpu_mon = _get_gpu_monitor()
+            gpu_mon.update()
+            gpu_list = []
+            for idx, g in sorted(gpu_mon.get_gpus().items()):
+                gpu_list.append({
+                    "index": g.index,
+                    "name": g.name,
+                    "vendor": g.vendor.value,
+                    "temp_c": g.temp,
+                    "power_w": g.power_w,
+                    "utilization_pct": g.util_percent,
+                    "vram_used_gb": g.vram_used_gb,
+                    "vram_total_gb": g.vram_total_gb,
+                    "fan_percent": g.fan_percent,
+                    "pci_slot": g.pci_slot,
+                })
+            return gpu_list
+        except Exception as e:
+            print(f"[daemon_client] GPU monitor failed: {e}")
+            return []
 
     def _self_latency_probe(self, proxy_health: Optional[dict] = None) -> dict:
         """Report gateway latency without sending chat completions.
@@ -434,10 +494,10 @@ class DaemonClient:
         and merges it with live-local fallback data.
         """
         # Collect live-local data first (always needed for keys apex-status omits)
-        law0_ok, law0 = self._run_text(["/opt/roxy/bin/roxy-law0"], timeout=5.0)
-        guard_ok, guard = self._run_text(["/opt/roxy/bin/roxy-external-guard"], timeout=5.0)
-        work_ok, work = self._run_text(["findmnt", "/mnt/work"])
-        df_ok, df = self._run_text(["df", "-hT", "/", "/mnt/work"])
+        law0_ok, law0 = self._run_text_cached(["/opt/roxy/bin/roxy-law0"], timeout=5.0, ttl=30.0)
+        guard_ok, guard = self._run_text_cached(["/opt/roxy/bin/roxy-external-guard"], timeout=5.0, ttl=30.0)
+        work_ok, work = self._run_text_cached(["findmnt", "/mnt/work"], ttl=30.0)
+        df_ok, df = self._run_text_cached(["df", "-hT", "/", "/mnt/work"], ttl=30.0)
         ollama_ok, models, ollama_error = self._ollama_models()
         load = self._load_info()
         memory = self._memory_info()
@@ -447,27 +507,7 @@ class DaemonClient:
         root_usage = self._usage_for_path("/")
         work_usage = self._usage_for_path("/mnt/work")
         temps = self._temperature_summary()
-        # GPU telemetry from GpuMonitor (same source Mission Center uses)
-        try:
-            gpu_mon = _get_gpu_monitor()
-            gpu_mon.update()
-            gpu_list = []
-            for idx, g in sorted(gpu_mon.get_gpus().items()):
-                gpu_list.append({
-                    "index": g.index,
-                    "name": g.name,
-                    "vendor": g.vendor.value,
-                    "temp_c": g.temp,
-                    "power_w": g.power_w,
-                    "utilization_pct": g.util_percent,
-                    "vram_used_gb": g.vram_used_gb,
-                    "vram_total_gb": g.vram_total_gb,
-                    "fan_percent": g.fan_percent,
-                    "pci_slot": g.pci_slot,
-                })
-        except Exception as e:
-            gpu_list = []
-            print(f"[daemon_client] GPU monitor failed: {e}")
+        gpu_list = self._gpu_snapshot()
         externals = self._external_state()
         workloads = self._active_workloads()
 
@@ -533,10 +573,10 @@ class DaemonClient:
             return apex_data
         
         # Fallback: build entirely from local system probes
-        law0_ok, law0 = self._run_text(["/opt/roxy/bin/roxy-law0"], timeout=5.0)
-        guard_ok, guard = self._run_text(["/opt/roxy/bin/roxy-external-guard"], timeout=5.0)
-        work_ok, work = self._run_text(["findmnt", "/mnt/work"])
-        df_ok, df = self._run_text(["df", "-hT", "/", "/mnt/work"])
+        law0_ok, law0 = self._run_text_cached(["/opt/roxy/bin/roxy-law0"], timeout=5.0, ttl=30.0)
+        guard_ok, guard = self._run_text_cached(["/opt/roxy/bin/roxy-external-guard"], timeout=5.0, ttl=30.0)
+        work_ok, work = self._run_text_cached(["findmnt", "/mnt/work"], ttl=30.0)
+        df_ok, df = self._run_text_cached(["df", "-hT", "/", "/mnt/work"], ttl=30.0)
         ollama_ok, models, ollama_error = self._ollama_models()
         load = self._load_info()
         memory = self._memory_info()
@@ -546,27 +586,7 @@ class DaemonClient:
         root_usage = self._usage_for_path("/")
         work_usage = self._usage_for_path("/mnt/work")
         temps = self._temperature_summary()
-        # GPU telemetry from GpuMonitor (same source Mission Center uses)
-        try:
-            gpu_mon = _get_gpu_monitor()
-            gpu_mon.update()
-            gpu_list = []
-            for idx, g in sorted(gpu_mon.get_gpus().items()):
-                gpu_list.append({
-                    "index": g.index,
-                    "name": g.name,
-                    "vendor": g.vendor.value,
-                    "temp_c": g.temp,
-                    "power_w": g.power_w,
-                    "utilization_pct": g.util_percent,
-                    "vram_used_gb": g.vram_used_gb,
-                    "vram_total_gb": g.vram_total_gb,
-                    "fan_percent": g.fan_percent,
-                    "pci_slot": g.pci_slot,
-                })
-        except Exception as e:
-            gpu_list = []
-            print(f"[daemon_client] GPU monitor failed: {e}")
+        gpu_list = self._gpu_snapshot()
         externals = self._external_state()
         workloads = self._active_workloads()
 

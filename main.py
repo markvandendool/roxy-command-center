@@ -15,6 +15,7 @@ import os
 import json
 import signal
 import faulthandler
+import time
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
@@ -269,6 +270,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._poll_source_id: Optional[int] = None
         self._is_visible = True
         self._refresh_interval_ms = 5000
+        self._fetch_pending = False
+        self._last_ui_update_at = 0.0
+        self._min_ui_update_interval_s = 1.0
         print("[MainWindow] Data structures initialized")
         
         # Initialize alert manager with app
@@ -555,6 +559,8 @@ class MainWindow(Adw.ApplicationWindow):
         page_map = {key: page for key, page in page_map.items() if page is not None}
         if visible_name == "missions" and self.missions_page is not None:
             self.missions_page.update(data)
+        elif visible_name == "overview" and self.overview_page is not None:
+            self.overview_page.update(data)
         elif visible_name == "home" and self.home_page is not None:
             self.home_page.update(data)
         elif visible_name in page_map:
@@ -594,7 +600,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Start adaptive polling: 5s visible, 30s background."""
         self._stop_polling()
         self._refresh_interval_ms = interval_ms if self._is_visible else 30000
-        self._fetch_data()
+        self._fetch_data(force=True)
         self._poll_source_id = GLib.timeout_add(self._refresh_interval_ms, self._on_poll_timer)
         print(f"[MainWindow] Polling: {self._refresh_interval_ms}ms (visible={self._is_visible})")
     
@@ -650,9 +656,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._fetch_data()
         return True  # Continue
     
-    def _fetch_data(self):
+    def _fetch_data(self, force: bool = False):
         """Fetch data from daemon."""
+        if self._fetch_pending:
+            return
+        self._fetch_pending = True
+
         def on_data(response):
+            self._fetch_pending = False
             # Handle DaemonResponse object
             if hasattr(response, 'data'):
                 raw_data = response.data if response.data else {}
@@ -698,7 +709,10 @@ class MainWindow(Adw.ApplicationWindow):
                 # Accumulate telemetry history for sparklines
                 get_collector().push(data)
                 
-                self._update_ui(data)
+                now = time.monotonic()
+                if force or now - self._last_ui_update_at >= self._min_ui_update_interval_s:
+                    self._last_ui_update_at = now
+                    self._update_ui(data)
                 
                 # Update header mode
                 mode = data.get("mode", "local")
@@ -711,7 +725,7 @@ class MainWindow(Adw.ApplicationWindow):
                 gpu_count = len(data.get("gpus", []))
                 self.header.set_debug_info(cpu_pct, gpu_count)
                 
-                # Process alerts
+                # Process alerts at poll cadence only. Manual duplicate callbacks are coalesced above.
                 alert_manager = get_alert_manager()
                 alert_manager.process_daemon_data(raw_data)
                 
@@ -727,16 +741,8 @@ class MainWindow(Adw.ApplicationWindow):
         GTK4 Stack shows one child at a time. Updating invisible pages wastes CPU
         on Cairo sparklines, table rebuilds, and label repaints.
         """
-        # Overview always updates (it's the LifePanel summary dashboard)
-        # It self-throttles sparkline redraws when not visible
-        if self.overview_page is not None:
-            self.overview_page.update(data)
-        
-        # Home page is lazy. Only update it after the operator explicitly opens it.
-        if self.home_page is not None:
-            self.home_page.update(data)
-        
-        # Only the visible page gets heavy update (tables, graphs, process lists)
+        # Only the visible page gets heavy update (tables, graphs, process lists).
+        # Hidden pages with their own timers now self-skip when unmapped.
         self._hydrate_current_page(data)
         
         # Nav badges always update (lightweight — just label text)
@@ -774,7 +780,7 @@ class MainWindow(Adw.ApplicationWindow):
     
     def refresh(self):
         """Manual refresh."""
-        self._fetch_data()
+        self._fetch_data(force=True)
     
     def do_close_request(self) -> bool:
         """Handle window close."""

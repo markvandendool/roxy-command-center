@@ -49,7 +49,7 @@ class SettingsPage(Gtk.ScrolledWindow):
             "mode": "local",
             "remote_host": "",
             "remote_port": 8080,
-            "poll_interval_ms": 1000,
+            "poll_interval_ms": 5000,
             "notifications_enabled": True,
             "theme": "system",
             "show_graphs": True,
@@ -131,10 +131,10 @@ class SettingsPage(Gtk.ScrolledWindow):
         conn_group.add(self.port_row)
         
         # Poll interval
-        poll_row = Adw.SpinRow.new_with_range(500, 10000, 100)
+        poll_row = Adw.SpinRow.new_with_range(5000, 60000, 1000)
         poll_row.set_title("Poll Interval (ms)")
-        poll_row.set_subtitle("How often to fetch data")
-        poll_row.set_value(self._config.get("poll_interval_ms", 1000))
+        poll_row.set_subtitle("Lower intervals increase CPU; hidden pages pause their timers")
+        poll_row.set_value(max(5000, self._config.get("poll_interval_ms", 5000)))
         poll_row.connect("notify::value", self._on_poll_interval_changed)
         conn_group.add(poll_row)
         
@@ -259,7 +259,7 @@ class SettingsPage(Gtk.ScrolledWindow):
     
     def _on_poll_interval_changed(self, row, pspec):
         """Handle poll interval change."""
-        self._emit_change("poll_interval_ms", int(row.get_value()))
+        self._emit_change("poll_interval_ms", max(5000, int(row.get_value())))
     
     def _on_notifications_changed(self, row, pspec):
         """Handle notifications toggle."""

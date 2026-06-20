@@ -26,6 +26,9 @@ from datetime import datetime
 SSOT_ROOT = Path("/mnt/work/ssot/mindsong-juke-hub")
 RCC_CLI = SSOT_ROOT / "scripts" / "rcc" / "rcc.mjs"
 RCC_RECEIPT_ROOT = SSOT_ROOT / "output" / "rcc" / "receipts"
+COMMAND_TIMEOUTS = {
+    "factory.routes": 120.0,
+}
 
 
 @dataclass
@@ -144,7 +147,7 @@ class RCCAdapter:
         if receipt:
             args.append("--receipt")
 
-        result = self._run_rcc(*args)
+        result = self._run_rcc(*args, timeout=COMMAND_TIMEOUTS.get(command_id, 30.0))
 
         if "json" in result:
             j = result["json"]

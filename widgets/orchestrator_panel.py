@@ -97,6 +97,8 @@ class OrchestratorPanel(Gtk.Box):
         scroll.set_child(self._content)
 
     def _on_auto_refresh(self):
+        if not self.get_mapped():
+            return True
         self._refresh()
         return True
 

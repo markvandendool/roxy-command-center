@@ -113,6 +113,8 @@ class MOSCockpitPage(Gtk.ScrolledWindow):
             self.text.get_buffer().set_text(f"MOS Cockpit snapshot failed: {exc}")
 
     def _poll_recent(self) -> bool:
+        if not self.get_mapped():
+            return True
         self.refresh(include_provider=False)
         return True
 

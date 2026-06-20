@@ -581,11 +581,15 @@ class VoiceActionsPage(Gtk.ScrolledWindow):
             self._rows_box.append(row)
 
     def _periodic_refresh(self):
+        if not self.get_mapped():
+            return True
         self._update_voice_status()
         self._update_wake_status()
         return True
 
     def update(self, data: dict):
+        if not self.get_mapped():
+            return
         self._update_voice_status()
         self._update_wake_status()
         self._update_voice_receipts()
