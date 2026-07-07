@@ -1,0 +1,11 @@
+{
+  "jobId": "judge-cc54f53a9426",
+  "status": "running",
+  "prompt": "Mission: GitNexus index stale\nStatus: blocked\nOwner: civilization-health\nBlockers: GitNexus index stale\n\nPlease perform an adversarial review. Identify errors, assumptions, gaps, or quality issues.",
+  "context": "GitNexus index stale",
+  "sourceMissionId": "blocker-e603cb2e",
+  "result": "",
+  "error": "",
+  "createdAt": "2026-06-05T21:10:57.139432",
+  "completedAt": ""
+}

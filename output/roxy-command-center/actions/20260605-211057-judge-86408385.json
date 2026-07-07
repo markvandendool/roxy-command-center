@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "judge",
+  "missionId": "blocker-e603cb2e",
+  "missionTitle": "GitNexus index stale",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T21:10:57.139592",
+  "status": "pending",
+  "targetAgent": "roxy-judge",
+  "targetLane": "judge",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-211057-judge-86408385.json",
+  "payload": {
+    "jobId": "judge-cc54f53a9426",
+    "promptPreview": "Mission: GitNexus index stale\nStatus: blocked\nOwner: civilization-health\nBlockers: GitNexus index stale\n\nPlease perform an adversarial review. Identify errors, assumptions, gaps, or quality issues."
+  },
+  "error": "",
+  "nextAction": "polling for completion",
+  "updatedAt": "2026-06-05T21:10:57.140784"
+}

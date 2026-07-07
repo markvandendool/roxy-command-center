@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "investigate",
+  "missionId": "blocker-e603cb2e",
+  "missionTitle": "GitNexus index stale",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T21:10:57.193888",
+  "status": "queued",
+  "targetAgent": "regent-investigator",
+  "targetLane": "read-only",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-211057-investigate-85662427.json",
+  "payload": {
+    "packetId": "investigate-c1098629f572",
+    "packetPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/investigations/20260605-211057-investigate-c1098629f572.json",
+    "questionPreview": "Voice request: investigate this",
+    "safeMode": true
+  },
+  "error": "",
+  "nextAction": "queue for read-only investigation"
+}

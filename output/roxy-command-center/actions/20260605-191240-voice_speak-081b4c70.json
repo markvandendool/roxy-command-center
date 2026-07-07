@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "voice_speak",
+  "missionId": "voice-speak",
+  "missionTitle": "Speak: End to end voice pipeline verified.",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T19:12:40.679557",
+  "status": "completed",
+  "targetAgent": "elevenlabs",
+  "targetLane": "voice-tts",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-191240-voice_speak-081b4c70.json",
+  "payload": {
+    "text": "End to end voice pipeline verified.",
+    "requestedVoice": "cgSgspJ2msm6clMCkdW9",
+    "useCase": "operator-response",
+    "source": "smoke-test",
+    "provider": "elevenlabs",
+    "ok": true,
+    "voiceId": "cgSgspJ2msm6clMCkdW9",
+    "audioPath": "/mnt/work/tmp/tmpc1ldtyyo.mp3",
+    "audioBytes": 34316,
+    "played": true,
+    "playError": null
+  },
+  "error": "",
+  "nextAction": "playback complete"
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "investigation-packet.v1",
+  "packetId": "investigate-c1098629f572",
+  "missionId": "blocker-e603cb2e",
+  "missionTitle": "GitNexus index stale",
+  "question": "Voice request: investigate this",
+  "sourceArtifacts": [
+    "public/roxy/civilization-health.json"
+  ],
+  "allowedReadPaths": [
+    "docs/",
+    "public/roxy/",
+    "output/",
+    "scripts/"
+  ],
+  "forbiddenPaths": [
+    "config/secrets/",
+    ".env*",
+    "*.key",
+    "*.pem"
+  ],
+  "expectedOutput": "Summary of findings with evidence citations",
+  "deadlineHours": 24,
+  "status": "queued",
+  "createdAt": "2026-06-05T21:10:57.193696",
+  "safeMode": true,
+  "mutationAllowed": false
+}

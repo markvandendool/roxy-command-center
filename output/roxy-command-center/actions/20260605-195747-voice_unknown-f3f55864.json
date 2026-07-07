@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "voice_unknown",
+  "missionId": "voice-command",
+  "missionTitle": "Voice: Each time...",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T19:57:47.966856",
+  "status": "completed",
+  "targetAgent": "roxy-voice",
+  "targetLane": "voice-command",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-195747-voice_unknown-f3f55864.json",
+  "payload": {
+    "transcript": "Each time...",
+    "response": "I heard: 'Each time...'. Known commands: status, ask the judge, assign Kimi, investigate.",
+    "speakInitiated": true
+  },
+  "error": "",
+  "nextAction": "display response"
+}

@@ -14,12 +14,55 @@ import sys
 import time
 import json
 import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Optional
 
 # Try to use the enhanced SSOT pipeline
 SSOT_VOICE_DIR = Path("/mnt/work/ssot/mindsong-juke-hub/scripts/voice/roxy-wake")
 USE_LEGACY = False
+
+
+def _decode_json_response(raw_body, *, status=None, reason=None):
+    text = raw_body.decode("utf-8", errors="replace") if raw_body else ""
+    if text.strip():
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = {"ok": False, "error": text.strip()}
+    else:
+        payload = {}
+
+    if status is not None:
+        payload.setdefault("httpStatus", status)
+    if reason:
+        payload.setdefault("httpReason", reason)
+    if status is not None and status >= 400:
+        payload.setdefault("ok", False)
+    return payload
+
+
+def _dictation_request(path: str):
+    DICTATION_URL = "http://127.0.0.1:10500"
+    req = urllib.request.Request(
+        f"{DICTATION_URL}{path}",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return _decode_json_response(
+                resp.read(),
+                status=getattr(resp, "status", None),
+                reason=getattr(resp, "reason", None),
+            )
+    except urllib.error.HTTPError as e:
+        payload = _decode_json_response(e.read(), status=e.code, reason=getattr(e, "reason", None))
+        payload.setdefault("error", f"HTTP {e.code}: {getattr(e, 'reason', 'HTTPError')}")
+        return payload
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def try_enhanced_pipeline(duration_s: float) -> bool:
@@ -29,20 +72,8 @@ def try_enhanced_pipeline(duration_s: float) -> bool:
         from brain import answer_query
         from tts_jessica import speak
 
-        DICTATION_URL = "http://127.0.0.1:10500"
-
-        def dictate_toggle():
-            req = urllib.request.Request(
-                f"{DICTATION_URL}/dictate/toggle",
-                data=b"{}",
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-
         # Start
-        start = dictate_toggle()
+        start = _dictation_request("/dictate/start")
         if not start.get("ok"):
             print(f"[voice-ptt] START FAILED: {start.get('error')}", flush=True)
             return False
@@ -51,8 +82,12 @@ def try_enhanced_pipeline(duration_s: float) -> bool:
         time.sleep(duration_s)
 
         # Stop
-        stop = dictate_toggle()
+        stop = _dictation_request("/dictate/stop")
         if not stop.get("ok"):
+            error = str(stop.get("error", ""))
+            if "No audio captured" in error or "file too small" in error:
+                print("[voice-ptt] No speech captured", flush=True)
+                return True
             print(f"[voice-ptt] STOP FAILED: {stop.get('error')}", flush=True)
             return False
 

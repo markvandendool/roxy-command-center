@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "voice_kimi",
+  "missionId": "voice-command",
+  "missionTitle": "Voice: assign to Kimi",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T21:10:57.192181",
+  "status": "completed",
+  "targetAgent": "roxy-voice",
+  "targetLane": "voice-command",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-211057-voice_kimi-2b65d24e.json",
+  "payload": {
+    "transcript": "assign to Kimi",
+    "missionId": "blocker-e603cb2e",
+    "missionName": "GitNexus index stale",
+    "packetId": "kimi-assign-4fc55d6dd42c",
+    "targetSurface": "visible-terminal",
+    "response": "Assigned mission 'GitNexus index stale' to Kimi on visible-terminal.",
+    "speakInitiated": true
+  },
+  "error": "",
+  "nextAction": "display response"
+}

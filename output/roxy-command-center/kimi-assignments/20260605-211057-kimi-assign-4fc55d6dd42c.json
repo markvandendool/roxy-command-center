@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "kimi-assignment-packet.v1",
+  "packetId": "kimi-assign-4fc55d6dd42c",
+  "missionId": "blocker-e603cb2e",
+  "missionTitle": "GitNexus index stale",
+  "brief": "Voice-assigned from Command Center. Transcript: assign to Kimi",
+  "allowedPaths": [
+    "docs/",
+    "src/",
+    "scripts/",
+    "output/"
+  ],
+  "forbiddenPaths": [
+    "config/secrets/",
+    ".env*",
+    "*.key"
+  ],
+  "requiredProof": [
+    "receipt",
+    "diff"
+  ],
+  "targetAgent": "kimi-terminal",
+  "targetSurface": "visible-terminal",
+  "status": "queued",
+  "createdAt": "2026-06-05T21:10:57.190905",
+  "queuedAt": "2026-06-05T21:10:57.190914"
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "voice_status",
+  "missionId": "voice-command",
+  "missionTitle": "Voice: Roxy, status",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T21:10:57.137432",
+  "status": "completed",
+  "targetAgent": "roxy-voice",
+  "targetLane": "voice-command",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-211057-voice_status-3866ca92.json",
+  "payload": {
+    "transcript": "Roxy, status",
+    "missionCount": 12,
+    "healthyCount": 4,
+    "blockedCount": 1,
+    "response": "Roxy status: 12 missions, 4 healthy, 1 blocked. Civilization is degraded.",
+    "speakInitiated": true
+  },
+  "error": "",
+  "nextAction": "display response"
+}

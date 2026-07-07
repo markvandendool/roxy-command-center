@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "voice_investigate",
+  "missionId": "voice-command",
+  "missionTitle": "Voice: investigate this",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T21:10:57.194633",
+  "status": "completed",
+  "targetAgent": "roxy-voice",
+  "targetLane": "voice-command",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-211057-voice_investigate-f0f9e9be.json",
+  "payload": {
+    "transcript": "investigate this",
+    "missionId": "blocker-e603cb2e",
+    "missionName": "GitNexus index stale",
+    "packetId": "investigate-c1098629f572",
+    "response": "Opened investigation for mission 'GitNexus index stale'.",
+    "speakInitiated": true
+  },
+  "error": "",
+  "nextAction": "display response"
+}

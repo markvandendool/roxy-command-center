@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "kimi_assign",
+  "missionId": "blocker-e603cb2e",
+  "missionTitle": "GitNexus index stale",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T21:10:57.191212",
+  "status": "queued",
+  "targetAgent": "kimi-terminal",
+  "targetLane": "visible-terminal",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-211057-kimi_assign-3140a924.json",
+  "payload": {
+    "packetId": "kimi-assign-4fc55d6dd42c",
+    "packetPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/kimi-assignments/20260605-211057-kimi-assign-4fc55d6dd42c.json",
+    "briefPreview": "Voice-assigned from Command Center. Transcript: assign to Kimi"
+  },
+  "error": "",
+  "nextAction": "dispatch to visible-terminal"
+}

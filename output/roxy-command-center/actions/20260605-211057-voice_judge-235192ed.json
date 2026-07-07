@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "voice_judge",
+  "missionId": "voice-command",
+  "missionTitle": "Voice: ask the judge",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T21:10:57.140665",
+  "status": "completed",
+  "targetAgent": "roxy-voice",
+  "targetLane": "voice-command",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-211057-voice_judge-235192ed.json",
+  "payload": {
+    "transcript": "ask the judge",
+    "missionId": "blocker-e603cb2e",
+    "missionName": "GitNexus index stale",
+    "jobId": "judge-cc54f53a9426",
+    "response": "Sent mission 'GitNexus index stale' to Judge. Job judge-cc54f53a9426 queued.",
+    "speakInitiated": true
+  },
+  "error": "",
+  "nextAction": "display response"
+}

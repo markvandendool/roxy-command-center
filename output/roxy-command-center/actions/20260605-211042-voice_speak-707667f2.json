@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "roxy-command-center-action.v1",
+  "action": "voice_speak",
+  "missionId": "voice-speak",
+  "missionTitle": "Speak: Roxy is operational.",
+  "source": "roxy-command-center",
+  "requestedAt": "2026-06-05T21:10:42.629124",
+  "status": "completed",
+  "targetAgent": "elevenlabs",
+  "targetLane": "voice-tts",
+  "authority": "operator",
+  "receiptPath": "/mnt/work/roxy-core/apps/roxy-command-center-review/output/roxy-command-center/actions/20260605-211042-voice_speak-707667f2.json",
+  "payload": {
+    "text": "Roxy is operational.",
+    "requestedVoice": "cgSgspJ2msm6clMCkdW9",
+    "useCase": "operator-response",
+    "source": "test",
+    "provider": "elevenlabs",
+    "ok": true,
+    "voiceId": "cgSgspJ2msm6clMCkdW9",
+    "audioPath": "/mnt/work/tmp/tmpxkyfbrg1.mp3",
+    "audioBytes": 25539,
+    "played": true,
+    "playError": null
+  },
+  "error": "",
+  "nextAction": "playback complete"
+}
