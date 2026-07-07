@@ -13,16 +13,11 @@ import urllib.request
 import shutil
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, Callable, Dict, Any, Tuple
+from typing import Optional, Callable, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import GLib
-
-# Lazy import to avoid GTK init issues during import
-def _get_gpu_monitor():
-    from services.gpu_monitor import get_gpu_monitor
-    return get_gpu_monitor()
 
 DAEMON_PATH = Path.home() / ".config/eww/roxy-panel/scripts/roxy-panel-daemon.py"
 OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
@@ -53,7 +48,6 @@ class DaemonClient:
         self.timeout = timeout
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="daemon")
         self._cache: Optional[DaemonResponse] = None
-        self._probe_cache: Dict[str, Tuple[float, Any]] = {}
         self._pending = False
         self._callbacks: list = []
         
@@ -61,16 +55,6 @@ class DaemonClient:
         self.mode = "auto"
         self.remote_host = "10.0.0.69"
         self.remote_port = 8766
-
-    def _cached(self, key: str, ttl: float, producer: Callable[[], Any]) -> Any:
-        """Return a cached probe result when it is still fresh."""
-        now = time.time()
-        cached = self._probe_cache.get(key)
-        if cached and now - cached[0] <= ttl:
-            return cached[1]
-        value = producer()
-        self._probe_cache[key] = (now, value)
-        return value
     
     def configure(self, mode: str = "auto", remote_host: str = "10.0.0.69", remote_port: int = 8766):
         """Update daemon connection configuration."""
@@ -200,12 +184,8 @@ class DaemonClient:
         except Exception as exc:
             return False, str(exc)
 
-    def _run_text_cached(self, command: list[str], timeout: float = 2.0, ttl: float = 15.0) -> tuple[bool, str]:
-        key = "cmd:" + "\0".join(command)
-        return self._cached(key, ttl, lambda: self._run_text(command, timeout=timeout))
-
     def _failed_unit_count(self) -> int:
-        ok, output = self._run_text_cached(["systemctl", "--failed", "--no-legend", "--no-pager"], timeout=3.0, ttl=30.0)
+        ok, output = self._run_text(["systemctl", "--failed", "--no-legend", "--no-pager"], timeout=3.0)
         if not ok or not output:
             return 0
         return len([line for line in output.splitlines() if line.strip()])
@@ -276,9 +256,6 @@ class DaemonClient:
             return {"mount": path, "error": str(exc), "used_pct": 0.0}
 
     def _temperature_summary(self) -> dict:
-        return self._cached("temperature_summary", 10.0, self._temperature_summary_uncached)
-
-    def _temperature_summary_uncached(self) -> dict:
         temps: dict[str, float] = {}
         for hwmon in Path("/sys/class/hwmon").glob("hwmon*"):
             try:
@@ -310,7 +287,7 @@ class DaemonClient:
         }
 
     def _external_state(self) -> dict:
-        findmnt_ok, mounted = self._run_text_cached(["findmnt", "-rn"], timeout=3.0, ttl=30.0)
+        findmnt_ok, mounted = self._run_text(["findmnt", "-rn"], timeout=3.0)
         text = mounted if findmnt_ok else ""
         return {
             "p51_visible": "P51_GDRIVE_CLONE" in text,
@@ -319,9 +296,6 @@ class DaemonClient:
         }
 
     def _active_workloads(self) -> dict:
-        return self._cached("active_workloads", 15.0, self._active_workloads_uncached)
-
-    def _active_workloads_uncached(self) -> dict:
         ollama_ok, ollama_ps = self._run_text(["ollama", "ps"], timeout=3.0)
         docker_ok, docker_ps = self._run_text(
             ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}"],
@@ -335,9 +309,6 @@ class DaemonClient:
         }
 
     def _service_state(self, service: str) -> dict:
-        return self._cached(f"service_state:{service}", 15.0, lambda: self._service_state_uncached(service))
-
-    def _service_state_uncached(self, service: str) -> dict:
         active_ok, active = self._run_text(["systemctl", "is-active", service])
         enabled_ok, enabled = self._run_text(["systemctl", "is-enabled", service])
         return {
@@ -349,9 +320,6 @@ class DaemonClient:
         }
 
     def _ollama_models(self) -> tuple[bool, list[dict], str]:
-        return self._cached("ollama_models", 30.0, self._ollama_models_uncached)
-
-    def _ollama_models_uncached(self) -> tuple[bool, list[dict], str]:
         try:
             with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=2.0) as resp:
                 payload = json.loads(resp.read().decode())
@@ -366,138 +334,12 @@ class DaemonClient:
         except Exception as exc:
             return False, [], str(exc)
 
-    def _read_apex_status_json(self) -> Optional[dict]:
-        """Read canonical ~/.roxy/apex-status.json if available."""
-        try:
-            path = Path.home() / ".roxy" / "apex-status.json"
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-        except Exception as e:
-            print(f"[daemon_client] apex-status.json read failed: {e}")
-        return None
-
-    def _qdrant_info(self) -> dict:
-        """Query Qdrant for live vector store stats."""
-        return self._cached("qdrant_info", 30.0, self._qdrant_info_uncached)
-
-    def _qdrant_info_uncached(self) -> dict:
-        try:
-            req = urllib.request.Request(
-                "http://127.0.0.1:3002/collections/mindsong-brain-v1",
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                payload = json.loads(resp.read().decode())
-            result = payload.get("result", {})
-            return {
-                "status": result.get("status", "unknown"),
-                "points_count": result.get("points_count", 0),
-                "indexed_vectors_count": result.get("indexed_vectors_count", 0),
-                "vectors_count": result.get("vectors_count", 0),
-                "reachable": True,
-            }
-        except Exception as e:
-            return {"reachable": False, "error": str(e)[:120]}
-
-    def _proxy_health(self) -> dict:
-        """Query roxy-chat-proxy health without triggering model generation."""
-        return self._cached("proxy_health", 15.0, self._proxy_health_uncached)
-
-    def _proxy_health_uncached(self) -> dict:
-        try:
-            req = urllib.request.Request(
-                "http://127.0.0.1:4001/health",
-                headers={"Content-Type": "application/json"},
-            )
-            t0 = time.time()
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                payload = json.loads(resp.read().decode())
-            t1 = time.time()
-            return {
-                "reachable": True,
-                "health_latency_ms": round((t1 - t0) * 1000),
-                "upstream_reachable": payload.get("upstreamReachable", False),
-                "prompt_loaded": payload.get("promptLoaded", False),
-                "skill_docs": payload.get("skillDocs", 0),
-                "skill_embeddings_loaded": payload.get("skillEmbeddingsLoaded", False),
-                "storage": payload.get("storage", {}),
-                "max_tokens_floor": payload.get("maxTokensFloor", 1500),
-            }
-        except Exception as e:
-            return {"reachable": False, "error": str(e)[:120]}
-
-    def _gpu_snapshot(self) -> list[dict]:
-        """Return live GPU data with a short cache to avoid expensive helper churn."""
-        return self._cached("gpu_snapshot", 5.0, self._gpu_snapshot_uncached)
-
-    def _gpu_snapshot_uncached(self) -> list[dict]:
-        try:
-            gpu_mon = _get_gpu_monitor()
-            gpu_mon.update()
-            gpu_list = []
-            for idx, g in sorted(gpu_mon.get_gpus().items()):
-                gpu_list.append({
-                    "index": g.index,
-                    "name": g.name,
-                    "vendor": g.vendor.value,
-                    "temp_c": g.temp,
-                    "power_w": g.power_w,
-                    "utilization_pct": g.util_percent,
-                    "vram_used_gb": g.vram_used_gb,
-                    "vram_total_gb": g.vram_total_gb,
-                    "fan_percent": g.fan_percent,
-                    "pci_slot": g.pci_slot,
-                })
-            return gpu_list
-        except Exception as e:
-            print(f"[daemon_client] GPU monitor failed: {e}")
-            return []
-
-    def _self_latency_probe(self, proxy_health: Optional[dict] = None) -> dict:
-        """Report gateway latency without sending chat completions.
-
-        The old "minimal" ping posted "." to /v1/chat/completions. The chat
-        proxy correctly expanded that into ROXY's full brain/RAG prompt, so a
-        status refresh became expensive Ada generation. Keep this probe strictly
-        non-generating.
-        """
-        if proxy_health and proxy_health.get("reachable"):
-            return {
-                "reachable": True,
-                "latency_ms": proxy_health.get("health_latency_ms", 0),
-                "source": "proxy_health",
-                "non_generating": True,
-            }
-        try:
-            req = urllib.request.Request(
-                "http://127.0.0.1:4001/health",
-                headers={"Content-Type": "application/json"},
-            )
-            t0 = time.time()
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                resp.read()
-            t1 = time.time()
-            return {
-                "reachable": True,
-                "latency_ms": round((t1 - t0) * 1000),
-                "source": "proxy_health",
-                "non_generating": True,
-            }
-        except Exception as e:
-            return {"reachable": False, "error": str(e)[:120], "non_generating": True}
-    
     def _local_roxy_snapshot(self, error: str = "") -> dict:
-        """Build a non-mutating status snapshot for current ROXY.
-        
-        Prefers ~/.roxy/apex-status.json (written by emit-apex-status.mjs)
-        and merges it with live-local fallback data.
-        """
-        # Collect live-local data first (always needed for keys apex-status omits)
-        law0_ok, law0 = self._run_text_cached(["/opt/roxy/bin/roxy-law0"], timeout=5.0, ttl=30.0)
-        guard_ok, guard = self._run_text_cached(["/opt/roxy/bin/roxy-external-guard"], timeout=5.0, ttl=30.0)
-        work_ok, work = self._run_text_cached(["findmnt", "/mnt/work"], ttl=30.0)
-        df_ok, df = self._run_text_cached(["df", "-hT", "/", "/mnt/work"], ttl=30.0)
+        """Build a non-mutating status snapshot for current ROXY."""
+        law0_ok, law0 = self._run_text(["/opt/roxy/bin/roxy-law0"], timeout=5.0)
+        guard_ok, guard = self._run_text(["/opt/roxy/bin/roxy-external-guard"], timeout=5.0)
+        work_ok, work = self._run_text(["findmnt", "/mnt/work"])
+        df_ok, df = self._run_text(["df", "-hT", "/", "/mnt/work"])
         ollama_ok, models, ollama_error = self._ollama_models()
         load = self._load_info()
         memory = self._memory_info()
@@ -507,86 +349,6 @@ class DaemonClient:
         root_usage = self._usage_for_path("/")
         work_usage = self._usage_for_path("/mnt/work")
         temps = self._temperature_summary()
-        gpu_list = self._gpu_snapshot()
-        externals = self._external_state()
-        workloads = self._active_workloads()
-
-        services = {
-            "ollama": self._service_state("ollama.service"),
-            "docker": self._service_state("docker.service"),
-            "roxy-law0": self._service_state("roxy-law0.service"),
-        }
-        services["ollama"]["port"] = 11434
-        services["ollama"]["port_open"] = ollama_ok
-        services["ollama"]["models_loaded"] = [m["name"] for m in models]
-
-        # Try canonical apex-status.json first
-        apex_data = self._read_apex_status_json()
-        if apex_data:
-            # Merge live-local data that apex-status might not have
-            apex_data.setdefault("mode", "local")
-            # Storage: apex-status.json may omit disk usage; merge live-local
-            if not apex_data.get("storage"):
-                apex_data["storage"] = {}
-            apex_data["storage"].setdefault("root", {})
-            apex_data["storage"].setdefault("work", {})
-            apex_data["storage"]["root"].update(root_usage)
-            apex_data["storage"]["work"].update(work_usage)
-            apex_data["storage"]["externals"] = externals
-            # hostMemory: keep apex if present, else use live-local
-            if not apex_data.get("hostMemory"):
-                apex_data["hostMemory"] = {
-                    "status": "live",
-                    "ram": {
-                        "totalGb": memory.get("mem_total_gb", 0),
-                        "usedGb": memory.get("mem_used_gb", 0),
-                    },
-                    "swap": {
-                        "totalGb": memory.get("mem_total_gb", 0),  # proxy from available
-                        "usedGb": 0,
-                    },
-                }
-            # GPUs: merge live-local GPU data
-            if not apex_data.get("gpus"):
-                apex_data["gpus"] = gpu_list
-            # Roxy guards
-            if not apex_data.get("roxy"):
-                apex_data["roxy"] = {}
-            apex_data["roxy"].setdefault("law0_ok", law0_ok)
-            apex_data["roxy"].setdefault("external_guard_ok", guard_ok)
-            # Services: merge live-local
-            if not apex_data.get("services"):
-                apex_data["services"] = services
-            # Idle health / temperature
-            if not apex_data.get("idle_health"):
-                apex_data["idle_health"] = {}
-            apex_data["idle_health"].setdefault("temperature", temps)
-            # Live brain authority sources (not in apex snapshot)
-            apex_data["_live_qdrant"] = self._qdrant_info()
-            apex_data["_live_proxy"] = self._proxy_health()
-            apex_data["_live_latency"] = self._self_latency_probe(apex_data["_live_proxy"])
-            # Alerts
-            if error:
-                alerts = list(apex_data.get("alerts", []))
-                alerts.append({"level": "warning", "message": error})
-                apex_data["alerts"] = alerts
-            return apex_data
-        
-        # Fallback: build entirely from local system probes
-        law0_ok, law0 = self._run_text_cached(["/opt/roxy/bin/roxy-law0"], timeout=5.0, ttl=30.0)
-        guard_ok, guard = self._run_text_cached(["/opt/roxy/bin/roxy-external-guard"], timeout=5.0, ttl=30.0)
-        work_ok, work = self._run_text_cached(["findmnt", "/mnt/work"], ttl=30.0)
-        df_ok, df = self._run_text_cached(["df", "-hT", "/", "/mnt/work"], ttl=30.0)
-        ollama_ok, models, ollama_error = self._ollama_models()
-        load = self._load_info()
-        memory = self._memory_info()
-        cpu_idle = self._cpu_idle_pct()
-        cpu_used = max(0.0, 100.0 - cpu_idle)
-        failed_units = self._failed_unit_count()
-        root_usage = self._usage_for_path("/")
-        work_usage = self._usage_for_path("/mnt/work")
-        temps = self._temperature_summary()
-        gpu_list = self._gpu_snapshot()
         externals = self._external_state()
         workloads = self._active_workloads()
 
@@ -655,7 +417,6 @@ class DaemonClient:
                 },
                 "externals": externals,
             },
-            "gpus": gpu_list,
             "idle_health": {
                 "manual_snapshot": True,
                 "background_polling": False,
@@ -730,40 +491,42 @@ def fetch_status_async(callback: Callable[[DaemonResponse], None],
 def normalize_status(raw: dict) -> dict:
     """
     Normalize daemon payload to canonical schema.
-    Preserves ALL keys from apex-status.json including performance, swarm, lanes,
-    brainAuthority, judgeAuthority, and all new ROXY LifePanel data.
-    """
-    # Start with the full raw payload so nothing is dropped
-    result = dict(raw)
+    Handles all known variations: gpu/gpus, temp_c/temp, system/stats, etc.
     
-    # CPU/System — ensure normalized keys exist for backward compat
+    Returns dict with guaranteed keys:
+    - mode: str
+    - cpu: dict with cpu_pct, load_1m
+    - memory: dict with mem_used_gb, mem_total_gb
+    - gpus: list of normalized GPU dicts
+    - services: dict
+    - ollama: dict
+    - disk: dict
+    - alerts: list
+    - _raw: original payload for debugging
+    """
+    # CPU/System
     sys_data = raw.get("system") or raw.get("stats") or {}
-    perf = raw.get("performance") or {}
-    perf_cpu = perf.get("cpu") or {}
     cpu = {
-        "cpu_pct": sys_data.get("cpu_pct") or raw.get("cpu", {}).get("percent") or perf_cpu.get("utilPct") or 0,
-        "load_1m": sys_data.get("load_1m") or perf_cpu.get("load1") or 0,
-        "load_5m": sys_data.get("load_5m") or perf_cpu.get("load5") or 0,
-        "load_15m": sys_data.get("load_15m") or perf_cpu.get("load15") or 0,
+        "cpu_pct": sys_data.get("cpu_pct") or raw.get("cpu", {}).get("percent") or 0,
+        "load_1m": sys_data.get("load_1m") or 0,
     }
     
     # Memory
-    host_ram = (raw.get("hostMemory") or {}).get("ram", {})
     memory = {
-        "mem_used_gb": sys_data.get("mem_used_gb") or host_ram.get("usedGb") or host_ram.get("used_gb") or 0,
-        "mem_total_gb": sys_data.get("mem_total_gb") or host_ram.get("totalGb") or host_ram.get("total_gb") or 0,
-        "mem_available_gb": sys_data.get("mem_available_gb") or host_ram.get("availableGb") or host_ram.get("available_gb") or 0,
+        "mem_used_gb": sys_data.get("mem_used_gb") or 0,
+        "mem_total_gb": sys_data.get("mem_total_gb") or 0,
     }
     
     # Services
     services = raw.get("services") or {}
     
     # GPUs: accept 'gpu' (list) or 'gpus' (list) or dict
-    g = raw.get("gpus") or raw.get("gpu") or (perf.get("gpu") or {}).get("gpus")
+    g = raw.get("gpus") or raw.get("gpu")
     gpus = []
     if isinstance(g, list):
         gpus = g
     elif isinstance(g, dict):
+        # Some daemons use {"0": {...}, "1": {...}}
         if all(str(k).isdigit() for k in g.keys()):
             for k in sorted(g.keys(), key=lambda x: int(x)):
                 gpus.append(g[k])
@@ -775,40 +538,36 @@ def normalize_status(raw: dict) -> dict:
     for i, gpu in enumerate(gpus):
         if not isinstance(gpu, dict):
             continue
+        
+        # Handle vram in GB or bytes
         vram_used = gpu.get("vram_used_gb") or 0
         vram_total = gpu.get("vram_total_gb") or 16
         if vram_used == 0 and gpu.get("vram_used_bytes"):
             vram_used = gpu.get("vram_used_bytes") / (1024**3)
         if vram_total == 0 and gpu.get("vram_total_bytes"):
             vram_total = gpu.get("vram_total_bytes") / (1024**3)
-        if vram_used == 0 and gpu.get("vramUsedMiB"):
-            vram_used = gpu.get("vramUsedMiB") / 1024
-        if vram_total == 16 and gpu.get("vramTotalMiB"):
-            vram_total = gpu.get("vramTotalMiB") / 1024
         
         norm_gpus.append({
             "index": gpu.get("index", i),
             "name": gpu.get("name") or gpu.get("model") or f"GPU {i}",
-            "temp_c": gpu.get("temp_c") or gpu.get("tempC") or gpu.get("temp") or gpu.get("temperature_c") or 0,
-            "utilization_pct": gpu.get("utilization_pct") or gpu.get("utilPct") or gpu.get("gpu_busy_percent") or gpu.get("util") or 0,
+            "temp_c": gpu.get("temp_c") or gpu.get("temp") or gpu.get("temperature_c") or 0,
+            "utilization_pct": gpu.get("utilization_pct") or gpu.get("gpu_busy_percent") or gpu.get("util") or 0,
             "vram_used_gb": vram_used,
             "vram_total_gb": vram_total,
-            "power_w": gpu.get("power_w") or gpu.get("powerW") or 0,
+            "power_w": gpu.get("power_w") or 0,
         })
     
-    # Merge normalized backward-compat keys.
-    # Always overwrite gpus/cpu/memory with normalized forms to prevent type mismatches.
-    result["mode"] = raw.get("mode", "local")
-    result["cpu"] = cpu
-    result["memory"] = memory
-    result["gpus"] = norm_gpus
-    result["services"] = services
-    result["ollama"] = raw.get("ollama") or {}
-    result["disk"] = raw.get("disk") or {}
-    result["alerts"] = raw.get("alerts") or []
-    result["roxy"] = raw.get("roxy") or {}
-    result["storage"] = raw.get("storage") or {}
-    result["idle_health"] = raw.get("idle_health") or {}
-    result["_raw"] = raw
-    
-    return result
+    return {
+        "mode": raw.get("mode", "local"),
+        "cpu": cpu,
+        "memory": memory,
+        "gpus": norm_gpus,
+        "services": services,
+        "ollama": raw.get("ollama") or {},
+        "disk": raw.get("disk") or {},
+        "alerts": raw.get("alerts") or [],
+        "roxy": raw.get("roxy") or {},
+        "storage": raw.get("storage") or {},
+        "idle_health": raw.get("idle_health") or {},
+        "_raw": raw,  # Keep original for debug
+    }

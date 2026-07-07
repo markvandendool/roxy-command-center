@@ -1,26 +1,15 @@
 #!/usr/bin/env python3
 """
-Chat Service — Canonical ROXY Harness Adapter.
+Chat Service - current ROXY adapter.
 
 DOCTRINE:
 - GTK app stays thin client
-- ALL owner-facing chat goes through roxy-chat-proxy :4001
-- Never call raw Qwen, never call raw LiteLLM, never call Ollama /api/generate directly
-
-Canonical path:
-  GTK4 Roxy Command Center
-  → POST http://127.0.0.1:4001/v1/chat/completions
-  → roxy-chat-proxy.mjs (:4001)
-  → config/roxy/roxy-brain-system-prompt.md
-  → skill embeddings
-  → SQLite memory
-  → Qdrant/RAG/context
-  → LiteLLM :4000
-  → Qwen 3.6 MTP :8085
+- Current review build talks directly to the local Ollama service
+- No production core service is assumed
 
 Endpoints used:
-- GET  /health           — proxy health + upstream reachability
-- POST /v1/chat/completions — canonical chat with RAG/memory/context
+- GET /api/tags - health/model list
+- POST /api/generate - foreground chat smoke
 """
 
 import gi
@@ -29,36 +18,19 @@ from gi.repository import GLib, Soup, Gio
 import json
 import os
 from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Optional, Callable, List, Dict, Any
+from dataclasses import dataclass
+from typing import Optional, Callable, List
 from datetime import datetime
 from enum import Enum
 import uuid
-
-from services.factory_truth_service import get_factory_truth_service
 
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-ROXY_CHAT_PROXY_URL = os.getenv("ROXY_CHAT_PROXY_URL", "http://127.0.0.1:4001").rstrip("/")
-DEFAULT_MODEL = os.getenv("ROXY_COMMAND_CENTER_MODEL", "roxy-coder-frontier")
-
-# Lane model mapping — mirrors config/roxy/model-backends.json
-LANE_MODELS = {
-    "auto": "roxy-coder-frontier",      # Auto-routed via keyword heuristic
-    "frontier": "roxy-coder-frontier",  # :8085 Qwen3.6-27B MTP Ada
-    "judge": "roxy-cpu-supermodel",     # :8084 Qwen3-235B CPU
-    "local": "roxy-chat",               # :11434 Ollama 7B
-    "cloud": "roxy-smart",              # LiteLLM → Claude fallback
-}
-
-# Health artifact path (SSOT repo canonical truth)
-APEX_STATUS_PATH = Path("/mnt/work/ssot/mindsong-juke-hub/public/roxy/apex-status.json")
-
-# Session persistence — no localStorage in GTK; use canonical JSON file
-SESSION_PATH = Path.home() / ".config" / "roxy-command-center" / "chat-session.json"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+DEFAULT_MODEL = os.getenv("ROXY_COMMAND_CENTER_MODEL", "tinyllama")
 
 
 # =============================================================================
@@ -72,13 +44,13 @@ class Identity(Enum):
 
 
 class ChatMode(Enum):
-    """Chat mode — human-in-the-loop control."""
+    """Chat mode - human-in-the-loop control."""
     DRAFT = "draft"      # Roxy suggests, user approves
     SEND = "send"        # Roxy executes directly (requires explicit arming)
 
 
 class ConnectionStatus(Enum):
-    """Connection state to ROXY harness."""
+    """Connection state to local Ollama."""
     DISCONNECTED = "disconnected"
     CONNECTING = "connecting"
     WARMING = "warming"
@@ -95,23 +67,6 @@ class ChatMessage:
     timestamp: datetime
     identity: Identity = Identity.MINDSONG
     pending: bool = False  # True while waiting for response
-    # Roxy harness metadata (populated on assistant messages)
-    latency_ms: int = 0
-    model: str = ""
-    memory_refs: List[str] = field(default_factory=list)
-    proposed_actions: List[str] = field(default_factory=list)
-    # Context Inspector metadata (JARVIS Context Kernel)
-    context_hash: str = ""
-    context_kernel_version: str = ""
-    context_kernel_hash: str = ""
-    context_kernel: Dict[str, Any] = field(default_factory=dict)
-    source_health: Dict[str, Any] = field(default_factory=dict)
-    token_budget: Dict[str, Any] = field(default_factory=dict)
-    orico_counts: Dict[str, Any] = field(default_factory=dict)
-    degraded_reasons: List[str] = field(default_factory=list)
-    harness_bypassed: bool = False
-    # Structured data for error cards / evidence cards
-    structured_data: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -123,84 +78,7 @@ class ChatSession:
     messages: List[ChatMessage]
     created_at: datetime
     model: str = "unknown"
-    # Harness-level session id (from roxy-chat-proxy SQLite store)
-    roxy_session_id: Optional[str] = None
-
-
-# =============================================================================
-# SESSION PERSISTENCE
-# =============================================================================
-
-# =============================================================================
-# SESSION PERSISTENCE — Phase 4: Save-authority UX
-# =============================================================================
-
-MAX_BACKUPS = 5
-
-
-def _rotate_backups():
-    """Rotate session backups, keeping MAX_BACKUPS most recent."""
-    try:
-        parent = SESSION_PATH.parent
-        backups = sorted(parent.glob("chat-session.json.*.bak"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for old in backups[MAX_BACKUPS:]:
-            old.unlink(missing_ok=True)
-    except Exception:
-        pass
-
-
-def _atomic_write(path: Path, data: str):
-    """Atomic write: temp file + rename."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(data, encoding="utf-8")
-    tmp.replace(path)
-
-
-def _load_session_state() -> Dict[str, Any]:
-    """Load persisted session state from disk (session id + conversation history)."""
-    try:
-        if SESSION_PATH.exists():
-            return json.loads(SESSION_PATH.read_text(encoding="utf-8"))
-    except Exception as e:
-        print(f"[ChatService] Session load error: {e}")
-    return {}
-
-
-def _save_session_state(state: Dict[str, Any]) -> None:
-    """Save session state to disk with atomic write and backup rotation."""
-    try:
-        SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
-        # Backup existing file before overwrite
-        if SESSION_PATH.exists():
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup = SESSION_PATH.with_suffix(f".json.{ts}.bak")
-            SESSION_PATH.rename(backup)
-            _rotate_backups()
-        _atomic_write(SESSION_PATH, json.dumps(state, indent=2, default=str))
-    except Exception as e:
-        print(f"[ChatService] Session save error: {e}")
-
-
-def _export_session_to_markdown(messages: List[ChatMessage], path: Path) -> bool:
-    """Export conversation history to markdown file."""
-    try:
-        lines = ["# Roxy Conversation Export\n"]
-        lines.append(f"**Exported:** {datetime.now().isoformat()}\n")
-        lines.append(f"**Messages:** {len(messages)}\n\n---\n\n")
-        for m in messages:
-            role = "🧑 User" if m.role == "user" else "🤖 Roxy"
-            lines.append(f"## {role} — {m.timestamp.isoformat()}\n")
-            lines.append(f"{m.content}\n")
-            if m.model:
-                lines.append(f"\n*Model: {m.model} | Latency: {m.latency_ms}ms | Hash: {m.context_hash}*")
-            lines.append("\n---\n")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write(path, "\n".join(lines))
-        return True
-    except Exception as e:
-        print(f"[ChatService] Export error: {e}")
-        return False
-
+    
 
 # =============================================================================
 # CHAT SERVICE
@@ -208,25 +86,20 @@ def _export_session_to_markdown(messages: List[ChatMessage], path: Path) -> bool
 
 class ChatService:
     """
-    Service for communicating with ROXY through the canonical harness.
-
+    Service for communicating with current ROXY.
+    
     Responsibilities:
-    - Send messages to roxy-chat-proxy :4001 /v1/chat/completions
-    - Manage session state (with disk persistence)
-    - Maintain OpenAI-style messages[] history
+    - Send review-only messages to local Ollama
+    - Manage session state
     - Notify UI of responses (via callbacks)
     - Handle connection status
-    - Surface roxy metadata: memoryRefs, proposedActions, latency, model
-
+    
     Does NOT:
-    - Call Ollama /api/generate directly
-    - Call LiteLLM :4000 directly
-    - Call Qwen :8085 directly
     - Process LLM directly
     - Handle STT/TTS directly
     - Render UI
     """
-
+    
     def __init__(self):
         self._session: Optional[ChatSession] = None
         self._soup_session = Soup.Session()
@@ -245,40 +118,26 @@ class ChatService:
         self._pending_message: Optional[Soup.Message] = None
         self._timeout_error_triggered = False
         self._last_error_message: Optional[str] = None
-        self._proxy_base_url: str = ROXY_CHAT_PROXY_URL
-
-        # Phase 6: Service hardening — circuit breaker + exponential backoff
-        self._consecutive_failures: int = 0
-        self._circuit_open: bool = False
-        self._circuit_cooldown_until: Optional[datetime] = None
-        self._CIRCUIT_THRESHOLD: int = 5  # Open circuit after 5 consecutive failures
-        self._CIRCUIT_COOLDOWN_SECONDS: int = 30  # Stay open for 30s
-        self._MAX_BACKOFF_SECONDS: int = 16  # Max health check backoff
-
+        self._ollama_base_url: str = OLLAMA_BASE_URL
+        
         # Callbacks
         self._on_message: Optional[Callable[[ChatMessage], None]] = None
         self._on_status_change: Optional[Callable[[ConnectionStatus, str], None]] = None
         self._on_typing: Optional[Callable[[bool], None]] = None
-
+        
         # Metadata from last response
         self._last_model: str = "unknown"
         self._last_expert: str = "roxy"
         self._last_latency_ms: int = 0
-
-        # Lane selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
-        self._selected_lane: str = "auto"
-
+        
         # Execution metadata (Chief's Truth Panel)
         self._last_execution_meta: dict = {}
         self._on_meta_update: Optional[Callable[[dict], None]] = None
-
-        # Session persistence
-        self._persisted_state = _load_session_state()
-
+    
     # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------
-
+    
     def connect(
         self,
         identity: Identity = Identity.MINDSONG,
@@ -288,147 +147,45 @@ class ChatService:
         on_meta_update: Optional[Callable[[dict], None]] = None
     ):
         """
-        Connect to ROXY harness and create/load a session.
+        Connect to local Ollama and create/load a session.
+        
+        Args:
+            identity: Which identity to use (me vs mindsong)
+            on_message: Callback when new message arrives
+            on_status_change: Callback when connection status changes
+            on_typing: Callback when typing indicator should show/hide
+            on_meta_update: Callback when execution metadata updates
         """
         self._on_message = on_message
         self._on_status_change = on_status_change
         self._on_typing = on_typing
         self._on_meta_update = on_meta_update
-
-        # Restore session from disk (roxy_session_id + conversation history)
-        restored_session_id = self._persisted_state.get("roxy_session_id")
-        restored_messages = self.load_session_messages()
-
+        
+        # Create new session
         self._session = ChatSession(
             id=str(uuid.uuid4()),
             identity=identity,
             mode=ChatMode.DRAFT,
-            messages=restored_messages,
-            created_at=datetime.now(),
-            roxy_session_id=restored_session_id,
+            messages=[],
+            created_at=datetime.now()
         )
         
-        # Replay restored messages to UI
-        if restored_messages and on_message:
-            for m in restored_messages:
-                on_message(m)
-
-        # Test connection to harness
-        self._set_status(ConnectionStatus.CONNECTING, "Connecting to ROXY harness...")
-        self._ping_harness()
-
+        # Test connection
+        self._set_status(ConnectionStatus.CONNECTING, "Connecting to local Ollama...")
+        self._ping_roxy_core()
+    
     def disconnect(self):
-        """Disconnect from ROXY harness."""
+        """Disconnect from local Ollama."""
         self._session = None
         self._set_status(ConnectionStatus.DISCONNECTED, "Disconnected")
-
-    # -------------------------------------------------------------------------
-    # Session persistence (Phase 4: Save-authority UX)
-    # -------------------------------------------------------------------------
-
-    def save_session(self) -> bool:
-        """Persist full conversation history to disk."""
-        if not self._session:
-            return False
-        try:
-            state = {
-                "roxy_session_id": self._session.roxy_session_id,
-                "identity": self._session.identity.value,
-                "mode": self._session.mode.value,
-                "created_at": self._session.created_at.isoformat(),
-                "messages": [
-                    {
-                        "id": m.id,
-                        "role": m.role,
-                        "content": m.content,
-                        "timestamp": m.timestamp.isoformat(),
-                        "identity": m.identity.value,
-                        "latency_ms": m.latency_ms,
-                        "model": m.model,
-                        "memory_refs": m.memory_refs,
-                        "proposed_actions": m.proposed_actions,
-                        "context_hash": m.context_hash,
-                        "context_kernel_version": m.context_kernel_version,
-                        "context_kernel_hash": m.context_kernel_hash,
-                        "context_kernel": m.context_kernel,
-                        "source_health": m.source_health,
-                        "token_budget": m.token_budget,
-                        "orico_counts": m.orico_counts,
-                        "degraded_reasons": m.degraded_reasons,
-                        "harness_bypassed": m.harness_bypassed,
-                    }
-                    for m in self._session.messages
-                ],
-            }
-            _save_session_state(state)
-            return True
-        except Exception as e:
-            print(f"[ChatService] save_session error: {e}")
-            return False
-
-    def load_session_messages(self) -> List[ChatMessage]:
-        """Restore conversation messages from disk."""
-        try:
-            state = _load_session_state()
-            msgs = state.get("messages", [])
-            return [
-                ChatMessage(
-                    id=m.get("id", str(uuid.uuid4())),
-                    role=m["role"],
-                    content=m["content"],
-                    timestamp=datetime.fromisoformat(m["timestamp"]),
-                    identity=Identity(m.get("identity", "mindsong")),
-                    latency_ms=m.get("latency_ms", 0),
-                    model=m.get("model", ""),
-                    memory_refs=m.get("memory_refs", []),
-                    proposed_actions=m.get("proposed_actions", []),
-                    context_hash=m.get("context_hash", ""),
-                    context_kernel_version=m.get("context_kernel_version", ""),
-                    context_kernel_hash=m.get("context_kernel_hash", ""),
-                    context_kernel=m.get("context_kernel", {}),
-                    source_health=m.get("source_health", {}),
-                    token_budget=m.get("token_budget", {}),
-                    orico_counts=m.get("orico_counts", {}),
-                    degraded_reasons=m.get("degraded_reasons", []),
-                    harness_bypassed=m.get("harness_bypassed", False),
-                )
-                for m in msgs
-            ]
-        except Exception as e:
-            print(f"[ChatService] load_session_messages error: {e}")
-            return []
-
-    def clear_session(self) -> bool:
-        """Clear conversation history and reset session."""
-        if not self._session:
-            return False
-        self._session.messages.clear()
-        self._session.roxy_session_id = None
-        try:
-            _save_session_state({})
-            return True
-        except Exception as e:
-            print(f"[ChatService] clear_session error: {e}")
-            return False
-
-    def export_to_markdown(self, path: Optional[Path] = None) -> Optional[Path]:
-        """Export conversation to markdown file."""
-        if not self._session or not self._session.messages:
-            return None
-        if path is None:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            path = Path.home() / ".config" / "roxy-command-center" / "exports" / f"conversation-{ts}.md"
-        if _export_session_to_markdown(self._session.messages, path):
-            return path
-        return None
-
+    
     def send_message(self, text: str, routing_mode: str = "", pool: str = "") -> Optional[ChatMessage]:
         """
-        Send a message to ROXY and get a response.
+        Send a message to Roxy and get a response.
 
         Args:
             text: The user's message
-            routing_mode: Explicit routing mode (CHAT/RAG/EXEC) — empty means auto
+            routing_mode: Explicit routing mode (CHAT/RAG/EXEC) - empty means auto
             pool: Explicit pool, currently ignored unless ROXY/AUTO
 
         Returns:
@@ -437,10 +194,10 @@ class ChatService:
         if not self._session:
             print("[ChatService] No session, cannot send")
             return None
-
+        
         if not text.strip():
             return None
-
+        
         # Create user message
         user_msg = ChatMessage(
             id=str(uuid.uuid4()),
@@ -450,166 +207,74 @@ class ChatService:
             identity=self._session.identity
         )
         self._session.messages.append(user_msg)
-
+        
         # Notify UI
         if self._on_message:
             self._on_message(user_msg)
-
+        
         # Show typing indicator
         if self._on_typing:
             self._on_typing(True)
-
-        # Send to ROXY harness
-        self._send_to_harness(text, routing_mode=routing_mode, pool=pool)
-
+        
+        # Send to local Ollama with operator controls
+        self._send_to_roxy_core(text, routing_mode=routing_mode, pool=pool)
+        
         return user_msg
-
+    
     def set_mode(self, mode: ChatMode):
         """Set chat mode (draft vs send)."""
         if self._session:
             self._session.mode = mode
             print(f"[ChatService] Mode set to {mode.value}")
-
+    
     def set_identity(self, identity: Identity):
         """Switch identity."""
         if self._session:
             self._session.identity = identity
             print(f"[ChatService] Identity set to {identity.value}")
-
+    
     @property
     def status(self) -> ConnectionStatus:
         return self._status
-
+    
     @property
     def session(self) -> Optional[ChatSession]:
         return self._session
-
+    
     @property
     def model(self) -> str:
         return self._last_model
-
+    
     @property
     def expert(self) -> str:
         return self._last_expert
-
+    
     @property
     def latency_ms(self) -> int:
         return self._last_latency_ms
-
+    
     # -------------------------------------------------------------------------
-    # Lane selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
+    # Internal: local Ollama communication
     # -------------------------------------------------------------------------
-
-    def set_lane(self, lane: str):
-        """Set explicit lane. 'auto' uses keyword heuristic."""
-        lane = lane.lower()
-        if lane not in LANE_MODELS:
-            print(f"[ChatService] Unknown lane '{lane}', defaulting to auto")
-            lane = "auto"
-        self._selected_lane = lane
-        print(f"[ChatService] Lane set to: {lane} → {LANE_MODELS[lane]}")
-
-    @property
-    def selected_lane(self) -> str:
-        return getattr(self, "_selected_lane", "auto")
-
-    def _classify_prompt(self, text: str) -> str:
-        """Classify prompt for auto lane selection."""
-        t = text.lower()
-        # Judge keywords: audit, review, verify, judge, verdict, adversarial, check quality
-        judge_keywords = ["audit", "review", "verify", "judge", "verdict", "adversarial",
-                         "check quality", "code review", "security review", "assess"]
-        if any(kw in t for kw in judge_keywords):
-            return "judge"
-        # Local keywords: summarize, quick, small, brief, short, hello
-        local_keywords = ["summarize", "quick", "small", "brief", "short summary", "hello"]
-        if any(kw in t for kw in local_keywords):
-            return "local"
-        # Default to frontier for coding, planning, architecture
-        return "frontier"
-
-    def _resolve_model(self, text: str) -> str:
-        """Resolve final model alias based on selected lane + prompt."""
-        lane = self.selected_lane
-        if lane == "auto":
-            lane = self._classify_prompt(text)
-        model = LANE_MODELS.get(lane, DEFAULT_MODEL)
-        return model
-
-    @staticmethod
-    def get_lane_health() -> Dict[str, Any]:
-        """Read canonical lane health from apex-status.json."""
-        try:
-            data = json.loads(APEX_STATUS_PATH.read_text())
-            lanes = data.get("lanes", [])
-            health = {}
-            for lane in lanes:
-                name = lane.get("name", "")
-                port = lane.get("port")
-                status = lane.get("status", "unknown")
-                truth = lane.get("truthGrade", "unknown")
-                tps = lane.get("tps")
-                # Map backend names to lane keys
-                mapping = {
-                    "ada-coder-frontier": "frontier",
-                    "llama-cpp-cpu": "judge",
-                    "ollama": "local",
-                    "cloud-anthropic": "cloud",
-                }
-                key = mapping.get(name)
-                if key:
-                    health[key] = {
-                        "name": name,
-                        "port": port,
-                        "status": status,
-                        "truthGrade": truth,
-                        "tps": tps,
-                        "healthy": status == "healthy" and truth in ("live_probe", "cloud_api"),
-                    }
-            return health
-        except Exception as exc:
-            print(f"[ChatService] Lane health read failed: {exc}")
-            return {}
-
-    def ask_judge(self, text: str) -> Optional[ChatMessage]:
-        """Send text to Judge lane (adversarial review)."""
-        prev_lane = self.selected_lane
-        self.set_lane("judge")
-        msg = self.send_message(text, routing_mode="JUDGE")
-        self.set_lane(prev_lane)
-        return msg
-
-    # -------------------------------------------------------------------------
-    # Internal: ROXY harness communication
-    # -------------------------------------------------------------------------
-
-    def _ping_harness(self, retry_count: int = 0):
-        """Test connection to roxy-chat-proxy via /health endpoint."""
-        # Phase 6: Circuit breaker check
-        if self._circuit_open:
-            if self._circuit_cooldown_until and datetime.now() < self._circuit_cooldown_until:
-                remaining = int((self._circuit_cooldown_until - datetime.now()).total_seconds())
-                self._set_status(ConnectionStatus.ERROR, f"Circuit open — retry in {remaining}s")
-                return
-            else:
-                # Half-open: try one request
-                self._circuit_open = False
-                self._consecutive_failures = 0
-                print("[ChatService] Circuit half-open, attempting recovery...")
-
-        uri = f"{self._proxy_base_url}/health"
+    
+    def _ping_roxy_core(self, retry_count: int = 0):
+        """Test connection to Ollama via /api/tags endpoint.
+        
+        Args:
+            retry_count: Current retry attempt (max 2 retries on timeout)
+        """
+        uri = f"{self._ollama_base_url}/api/tags"
         message = Soup.Message.new("GET", uri)
 
-        self._soup_session.send_async(
-            message, GLib.PRIORITY_DEFAULT, None,
-            self._on_ping_response, retry_count
-        )
-
+        self._soup_session.send_async(message, GLib.PRIORITY_DEFAULT, None, self._on_ping_response, retry_count)
+    
     def _on_ping_response(self, session, result, retry_count):
         """Handle ping response from /health."""
         retry_count = retry_count if isinstance(retry_count, int) else 0
         try:
             input_stream = session.send_finish(result)
+            
+            # Read response
             data_stream = Gio.DataInputStream.new(input_stream)
             lines = []
             while True:
@@ -617,217 +282,127 @@ class ChatService:
                 if line is None:
                     break
                 lines.append(line)
-
+            
             data = "".join(lines)
-
+            
             if data:
                 try:
                     status = json.loads(data)
-                    if status.get("ok"):
-                        upstream_ok = status.get("upstreamReachable", False)
-                        svc = status.get("service", "roxy-chat-proxy")
-                        prompt_loaded = status.get("promptLoaded", False)
-                        skill_count = status.get("skillEmbeddingsLoaded", 0)
-                        storage = status.get("storage", {})
-                        storage_status = storage.get("status", "unknown")
+                    models = status.get("models", [])
+                    status_state = ConnectionStatus.CONNECTED
+                    model_names = [m.get("name", "") for m in models if isinstance(m, dict)]
+                    self._last_model = DEFAULT_MODEL if DEFAULT_MODEL in model_names else (model_names[0] if model_names else DEFAULT_MODEL)
+                    status_message = f"Ollama ready at {self._ollama_base_url} ({len(model_names)} models)"
 
-                        status_state = ConnectionStatus.CONNECTED if upstream_ok else ConnectionStatus.ERROR
-                        status_message = (
-                            f"{svc} ready • upstream={'OK' if upstream_ok else 'DOWN'} "
-                            f"• prompt={'loaded' if prompt_loaded else 'missing'} "
-                            f"• skills={skill_count} • store={storage_status}"
+                    if status_state != ConnectionStatus.ERROR:
+                        self._last_error_message = None
+                    self._set_status(status_state, status_message)
+
+                    if self._session and self._on_message:
+                        prefix = "✅" if status_state == ConnectionStatus.CONNECTED else "⚠️"
+                        sys_msg = ChatMessage(
+                            id=str(uuid.uuid4()),
+                            role="system",
+                            content=f"{prefix} {status_message}",
+                            timestamp=datetime.now()
                         )
-
-                        # Phase 6: Reset circuit breaker on success
-                        if self._consecutive_failures > 0:
-                            print(f"[ChatService] Circuit reset after {self._consecutive_failures} failures")
-                            self._consecutive_failures = 0
-                            self._circuit_open = False
-                            self._circuit_cooldown_until = None
-
-                        if status_state != ConnectionStatus.ERROR:
-                            self._last_error_message = None
-                        self._set_status(status_state, status_message)
-
-                        if self._session and self._on_message:
-                            prefix = "✅" if status_state == ConnectionStatus.CONNECTED else "⚠️"
-                            sys_msg = ChatMessage(
-                                id=str(uuid.uuid4()),
-                                role="system",
-                                content=f"{prefix} {status_message}",
-                                timestamp=datetime.now()
-                            )
-                            self._on_message(sys_msg)
-                    else:
-                        self._set_status(ConnectionStatus.ERROR, "Harness returned ok=false")
+                        self._on_message(sys_msg)
                 except json.JSONDecodeError:
-                    self._set_status(ConnectionStatus.CONNECTED, "Connected (non-JSON health)")
+                    self._set_status(ConnectionStatus.CONNECTED, "Connected")
             else:
-                self._set_status(ConnectionStatus.CONNECTED, "Connected (empty health)")
-
+                self._set_status(ConnectionStatus.CONNECTED, "Connected (no status)")
+                
         except Exception as e:
             error_str = str(e)
             is_timeout = "timed out" in error_str.lower() or "timeout" in error_str.lower()
-
-            # Phase 6: Exponential backoff for retries
-            if is_timeout and retry_count < 3:
-                backoff = min(2 ** retry_count, self._MAX_BACKOFF_SECONDS)
-                print(f"[ChatService] Ping timeout, retry {retry_count + 1}/3 in {backoff}s...")
-                GLib.timeout_add_seconds(backoff, lambda: self._ping_harness(retry_count + 1) or False)
+            
+            # Retry up to 2 times on timeout errors
+            if is_timeout and retry_count < 2:
+                print(f"[ChatService] Ping timeout, retry {retry_count + 1}/2...")
+                GLib.timeout_add_seconds(1, lambda: self._ping_roxy_core(retry_count + 1) or False)
                 return
-
-            # Phase 6: Circuit breaker — count consecutive failures
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= self._CIRCUIT_THRESHOLD:
-                self._circuit_open = True
-                self._circuit_cooldown_until = datetime.now() + __import__('datetime').timedelta(seconds=self._CIRCUIT_COOLDOWN_SECONDS)
-                print(f"[ChatService] Circuit OPEN after {self._consecutive_failures} failures. Cooldown {self._CIRCUIT_COOLDOWN_SECONDS}s.")
-
+            
             print(f"[ChatService] Ping failed: {e}")
-            self._set_status(ConnectionStatus.ERROR, f"Harness unreachable: {e}")
-
-    def _build_messages(self) -> List[Dict[str, str]]:
-        """Build OpenAI-compatible messages[] from session history."""
-        if not self._session:
-            return []
-        msgs = []
-        for m in self._session.messages:
-            # Only include user and assistant roles in the API payload
-            if m.role in ("user", "assistant"):
-                msgs.append({"role": m.role, "content": m.content})
-        return msgs
-
-    def _send_to_harness(self, text: str, routing_mode: str = "", pool: str = ""):
-        """Send message to roxy-chat-proxy :4001 /v1/chat/completions.
+            self._set_status(ConnectionStatus.ERROR, f"Connection failed: {e}")
+    
+    def _send_to_roxy_core(self, text: str, routing_mode: str = "", pool: str = ""):
+        """Send message to local Ollama /api/generate endpoint.
 
         Args:
             text: The message to send
-            routing_mode: Recorded as metadata only
-            pool: Ignored unless AUTO/ROXY
+            routing_mode: Recorded as metadata only in this direct adapter
+            pool: Ignored unless AUTO/ROXY in this direct adapter
         """
-        uri = f"{self._proxy_base_url}/v1/chat/completions"
+        uri = f"{self._ollama_base_url}/api/generate"
         message = Soup.Message.new("POST", uri)
-
+        
+        # Set headers
         headers = message.get_request_headers()
         headers.append("Content-Type", "application/json")
-
-        # Build OpenAI-compatible payload
-        # Lane-aware model selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
-        model = self._resolve_model(text)
-
-        # Judge is SLOW (3.5 t/s) — extend timeouts
-        is_judge = model == "roxy-cpu-supermodel"
-        if is_judge:
-            try:
-                self._soup_session.props.timeout = 180
-            except Exception:
-                pass
-            print("[ChatService] Judge lane selected — timeout extended to 180s")
-        else:
-            try:
-                self._soup_session.props.timeout = 120
-            except Exception:
-                pass
-
-        # Build messages array from conversation history
-        messages = self._build_messages()
-        # If the last message isn't already in history (it should be), ensure it is
-        if not messages or messages[-1].get("content") != text:
-            messages.append({"role": "user", "content": text})
-
+        # Build payload
+        model = self._last_model if self._last_model and self._last_model != "unknown" else DEFAULT_MODEL
         payload = {
             "model": model,
-            "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 2048,
-            "chat_template_kwargs": {
-                "enable_thinking": False,
-            },
+            "prompt": text,
+            "stream": False,
+            "options": {
+                "temperature": 0.2
+            }
         }
-
-        # Include session_id for persistence if we have one
-        if self._session and self._session.roxy_session_id:
-            payload["session_id"] = self._session.roxy_session_id
-
+        
         # Add explicit operator controls (Chief's Truth Panel)
         if routing_mode and routing_mode != "AUTO":
             payload["roxy_route_mode"] = routing_mode
-
+        
+        # Set body
         body_bytes = json.dumps(payload).encode('utf-8')
         message.set_request_body_from_bytes("application/json", GLib.Bytes.new(body_bytes))
-
+        
+        # Record start time for latency
         start_time = GLib.get_monotonic_time()
+        
+        # Store start_time as instance var since user_data doesn't work reliably
         self._request_start_time = start_time
         self._pending_request_active = True
         self._timeout_error_triggered = False
         self._last_error_message = None
         self._cancel_status_timeouts()
-        self._set_status(ConnectionStatus.CONNECTING, "Sending to ROXY harness...")
+        self._set_status(ConnectionStatus.CONNECTING, "Sending…")
         self._pending_message = message
-
-        print(f"[ChatService] Sending to {uri} model={model} msgs={len(messages)}")
-
+        
+        print(f"[ChatService] Sending to {uri}...")
+        
+        # Send async
         self._soup_session.send_async(
-            message,
-            GLib.PRIORITY_DEFAULT,
-            None,
-            self._on_chat_response,
-            None
+            message, 
+            GLib.PRIORITY_DEFAULT, 
+            None, 
+            self._on_run_response, 
+            None  # user_data - not reliably passed in all libsoup versions
         )
-        self._schedule_status_updates(is_judge=is_judge)
-
-    def _factory_route_diagnostics(self, model: str) -> List[str]:
-        """Return compact factory.status diagnostics for send errors."""
-        try:
-            truth = get_factory_truth_service().snapshot()
-            services = truth.get("servicesById", {}) or {}
-            lines = [f"Factory: {truth.get('verdict', 'UNKNOWN')}"]
-            for service_id, label in [
-                ("chat_proxy", "Proxy"),
-                ("litellm", "LiteLLM"),
-                ("frontier", "Ada"),
-                ("decode_6900xt", "6900XT"),
-                ("judge_235b", "Judge"),
-            ]:
-                svc = services.get(service_id, {}) if isinstance(services, dict) else {}
-                if not svc:
-                    continue
-                lines.append(
-                    f"{label}: {'OK' if svc.get('ready') else 'FAIL'} "
-                    f":{svc.get('port', '?')} {svc.get('status', 'unknown')}"
-                )
-            if "judge" in model.lower() or "cpu" in model.lower():
-                lines.append("Judge mode: Direct Reviewer for route doctor; chat send may be slow.")
-            return lines
-        except Exception as exc:
-            return [f"Factory diagnostics unavailable: {exc}"]
-
+        self._schedule_status_updates()
+    
     def _cancel_status_timeouts(self):
         for handle in self._timeout_handles:
             GLib.source_remove(handle)
         self._timeout_handles.clear()
 
-    def _schedule_status_updates(self, is_judge: bool = False):
+    def _schedule_status_updates(self):
         self._cancel_status_timeouts()
-        timeout_sec = 180 if is_judge else 120
-        warming_msg = (
-            "Loading Judge model… (235B CPU, ~3.5 t/s — expect 60–180s)"
-            if is_judge else
-            "Loading model… (cold start can take 60–120s)"
-        )
         self._timeout_handles.append(
             GLib.timeout_add_seconds(5, self._status_callback(
-                ConnectionStatus.WARMING, warming_msg
+                ConnectionStatus.WARMING,
+                "Loading model… (cold start can take 60–120s)"
             ))
         )
         self._timeout_handles.append(
             GLib.timeout_add_seconds(30, self._status_callback(
                 ConnectionStatus.WARMING,
-                "Still loading… (Judge may take 2–3 min)" if is_judge else "Still loading…"
+                "Still loading…"
             ))
         )
         self._timeout_handles.append(
-            GLib.timeout_add_seconds(timeout_sec, self._timeout_callback())
+            GLib.timeout_add_seconds(120, self._timeout_callback())
         )
 
     def _status_callback(self, status: ConnectionStatus, message: str):
@@ -842,8 +417,8 @@ class ChatService:
         def _callback():
             if not self._pending_request_active:
                 return False
-            host = self._proxy_base_url or ROXY_CHAT_PROXY_URL
-            message = f"Timed out waiting for first token. Check harness at {host}/health"
+            host = self._ollama_base_url or OLLAMA_BASE_URL
+            message = f"Timed out waiting for first token. Check Ollama host at {host}"
             self._timeout_error_triggered = True
             self._pending_request_active = False
             if self._pending_message is not None:
@@ -856,27 +431,27 @@ class ChatService:
             return False
         return _callback
 
-    def _on_chat_response(self, session, result, user_data):
-        """Handle /v1/chat/completions response from roxy-chat-proxy."""
+    def _on_run_response(self, session, result, user_data):
+        """Handle /api/generate response from local Ollama."""
         print("[ChatService] Response callback triggered")
         self._cancel_status_timeouts()
         self._pending_request_active = False
         self._pending_message = None
         self._timeout_error_triggered = False
-
+        
         # Hide typing indicator
         if self._on_typing:
             self._on_typing(False)
-
+        
         try:
             input_stream = session.send_finish(result)
-
-            # Calculate latency
+            
+            # Calculate latency using stored start time
             end_time = GLib.get_monotonic_time()
             start_time = getattr(self, '_request_start_time', end_time)
             self._last_latency_ms = int((end_time - start_time) / 1000)
             print(f"[ChatService] Latency: {self._last_latency_ms}ms")
-
+            
             # Read full response
             data_stream = Gio.DataInputStream.new(input_stream)
             lines = []
@@ -885,283 +460,81 @@ class ChatService:
                 if line is None:
                     break
                 lines.append(line)
-
-            response_text = "\n".join(lines)
-
-            if not response_text:
-                self._handle_error("No response from ROXY harness")
-                return
-
-            try:
-                data = json.loads(response_text)
-            except json.JSONDecodeError as e:
-                # Maybe it's plain text?
-                if response_text.strip():
-                    self._emit_assistant_message(response_text, "raw")
-                    self._set_status(
-                        ConnectionStatus.CONNECTED,
-                        f"Response received in {self._last_latency_ms}ms"
-                    )
-                else:
-                    self._handle_error(f"Invalid response: {e}")
-                return
-
-            # Check for proxy-level errors
-            if "error" in data and not data.get("choices"):
-                err_msg = data["error"]
-                detail = data.get("detail", "")
-                if isinstance(err_msg, dict):
-                    err_msg = err_msg.get("message", str(err_msg))
-
-                model = self._last_model or self._resolve_model("")
-                host = self._proxy_base_url or ROXY_CHAT_PROXY_URL
-
-                # Truth Contract: structured error with route, endpoint, and action
-                if err_msg == "PROMPT_BUDGET_EXCEEDED":
-                    self._handle_error(
-                        "🔒 Prompt too large for Judge lane. "
-                        "Send a shorter plan or switch to Frontier/Auto lane."
-                    )
-                elif err_msg == "PROVIDER_CONTEXT_LIMIT_BLOCKED":
-                    self._handle_error(
-                        "🔒 Provider context limit blocked. "
-                        "Try a shorter prompt or a different lane."
-                    )
-                elif "fetch failed" in str(err_msg).lower():
-                    # Transient network failure — give operator full context
-                    diagnostics = self._factory_route_diagnostics(model)
-                    structured_error = {
-                        "card_type": "error",
-                        "icon": "❌",
-                        "title": "Send failed",
-                        "subtitle": "Route could not reach backend",
-                        "details": {
-                            "Route": model,
-                            "Endpoint": f"POST {host}/v1/chat/completions",
-                            "Error": err_msg,
-                        },
-                        "diagnostics": diagnostics,
-                        "actions": ["Retry", "Switch lane"],
-                    }
-                    if detail:
-                        structured_error["details"]["Detail"] = str(detail)[:300]
-                    self._handle_error(
-                        "Send failed — route could not reach backend",
-                        structured_data=structured_error,
-                    )
-                else:
-                    diagnostics = self._factory_route_diagnostics(model)
-                    structured_error = {
-                        "card_type": "error",
-                        "icon": "❌",
-                        "title": "Harness error",
-                        "subtitle": str(err_msg),
-                        "details": {
-                            "Route": model,
-                            "Endpoint": f"POST {host}/v1/chat/completions",
-                        },
-                        "diagnostics": diagnostics,
-                        "actions": ["Retry", "Switch lane"],
-                    }
-                    if detail:
-                        structured_error["details"]["Detail"] = str(detail)[:300]
-                    self._handle_error(
-                        f"Harness error: {err_msg}",
-                        structured_data=structured_error,
-                    )
-                return
-
-            # Extract assistant content (OpenAI format)
-            assistant_text = ""
-            choices = data.get("choices", [])
-            if choices and isinstance(choices, list):
-                first_choice = choices[0]
-                if isinstance(first_choice, dict):
-                    message_obj = first_choice.get("message", {})
-                    if isinstance(message_obj, dict):
-                        assistant_text = message_obj.get("content", "")
-
-            # Extract model name
-            self._last_model = data.get("model", DEFAULT_MODEL)
-            self._last_expert = "roxy-harness"
-
-            # Extract roxy metadata
-            roxy_meta = data.get("roxy", {}) if isinstance(data.get("roxy"), dict) else {}
-            session_id = roxy_meta.get("sessionId") or data.get("session_id")
-            memory_refs = roxy_meta.get("memoryRefs", []) or []
-            proposed_actions = roxy_meta.get("proposedActions", []) or []
-            persistence_status = roxy_meta.get("persistenceStatus", "")
-            memory_status = roxy_meta.get("memoryStatus", "")
-            context_hash = roxy_meta.get("contextHash", "")
-            context_kernel_version = roxy_meta.get("contextKernelVersion", "")
-            context_kernel_hash = roxy_meta.get("contextKernelHash", "")
-            context_kernel = roxy_meta.get("contextKernel", {}) or {}
-            source_health = context_kernel.get("sourceHealth", {}) or {}
-            token_budget = context_kernel.get("tokenBudget", {}) or {}
-            memory_block = context_kernel.get("memory", {}) or {}
-            orico_counts = memory_block.get("orico", {}).get("counts", {}) or {}
-            degraded_reasons = context_kernel.get("degradedReasons", []) or []
-
-            # Persist session id
-            if session_id and self._session:
-                self._session.roxy_session_id = session_id
-                self._persisted_state["roxy_session_id"] = session_id
-                _save_session_state(self._persisted_state)
-
-            # Build execution metadata for Truth Panel
-            meta = {
-                "mode": "ROXY",
-                "pool": "AUTO",
-                "route": "harness",
-                "model_used": self._last_model,
-                "total_ms": self._last_latency_ms,
-                "session_id": session_id,
-                "persistence_status": persistence_status,
-                "memory_status": memory_status,
-                "memory_refs_count": len(memory_refs),
-                "proposed_actions_count": len(proposed_actions),
-                "context_hash": context_hash,
-                "context_kernel_version": context_kernel_version,
-                "context_kernel_hash": context_kernel_hash,
-                "context_kernel": context_kernel,
-                "source_health": source_health,
-                "token_budget": token_budget,
-                "orico_counts": orico_counts,
-                "degraded_reasons": degraded_reasons,
-            }
-            self._last_execution_meta = meta
-            if self._on_meta_update:
-                self._on_meta_update(meta)
-
-            print(f"[ChatService] Roxy meta: session={session_id} refs={len(memory_refs)} actions={len(proposed_actions)}")
-
-            # Harness bypass detection
-            # ROXY-harnessed responses MUST contain ROXY identity markers.
-            # Generic base-model responses ("Alibaba Cloud", "Qwen", "AI language model")
-            # without ROXY context = harness bypassed.
-            generic_markers = [
-                "Alibaba Cloud",
-                "developed by Alibaba",
-                "I am Qwen",
-                "I am a large language model",
-                "I am an AI language model",
-                "I don't have information about ROXY",
-                "I don't have information about MindSong",
-            ]
-            roxy_markers = [
-                "ROXY",
-                "Roxy Command Center",
-                "MindSong",
-                "Mark",
-                "local brain",
-                "memory",
-                "harness",
-                "estate",
-            ]
-            has_generic = any(m.lower() in assistant_text.lower() for m in generic_markers)
-            has_roxy = any(m.lower() in assistant_text.lower() for m in roxy_markers)
             
-            harness_bypassed = has_generic and not has_roxy
-            if harness_bypassed:
-                # Harness bypassed — prepend warning
-                warning = (
-                    "🚨 HARNESS BYPASSED 🚨\n"
-                    "The response came from the raw base model, not the ROXY harness.\n"
-                    "Expected: ROXY identity + Mark context + MindSong estate.\n"
-                    "Got: Generic provider response.\n"
-                    "---\n\n"
-                )
-                assistant_text = warning + assistant_text
-                self._set_status(
-                    ConnectionStatus.ERROR,
-                    "HARNESS BYPASSED — raw base model response"
-                )
-                # Override model to signal bypass
-                self._last_model = "HARNESS-BYPASSED"
-                if self._on_meta_update:
-                    self._last_execution_meta["harness_bypassed"] = True
-                    self._last_execution_meta["model_used"] = "HARNESS-BYPASSED"
-                    self._on_meta_update(self._last_execution_meta)
-
-            if assistant_text:
-                self._emit_assistant_message(
-                    assistant_text,
-                    model=self._last_model,
-                    latency_ms=self._last_latency_ms,
-                    memory_refs=memory_refs,
-                    proposed_actions=proposed_actions,
-                    context_hash=context_hash,
-                    context_kernel_version=context_kernel_version,
-                    context_kernel_hash=context_kernel_hash,
-                    context_kernel=context_kernel,
-                    source_health=source_health,
-                    token_budget=token_budget,
-                    orico_counts=orico_counts,
-                    degraded_reasons=degraded_reasons,
-                    harness_bypassed=harness_bypassed,
-                )
-                if not has_generic:
-                    self._set_status(
-                        ConnectionStatus.CONNECTED,
-                        f"Response received in {self._last_latency_ms}ms"
-                    )
-                self._last_error_message = None
+            response_text = "\n".join(lines)
+            
+            if response_text:
+                try:
+                    data = json.loads(response_text)
+                    
+                    # Extract response
+                    assistant_text = data.get("response", data.get("result", ""))
+                    self._last_expert = "local-ollama"
+                    if data.get("model"):
+                        self._last_model = data["model"]
+                    
+                    # Updates for Chief's Truth Panel metadata
+                    if "metadata" in data:
+                        meta = data["metadata"]
+                        self._last_execution_meta = meta
+                        
+                        # Notify UI if callback registered
+                        if self._on_meta_update:
+                            self._on_meta_update(meta)
+                        
+                        print(f"[ChatService] Execution metadata: {json.dumps(meta)}")
+                    
+                    if assistant_text:
+                        # Create assistant message
+                        assistant_msg = ChatMessage(
+                            id=str(uuid.uuid4()),
+                            role="assistant",
+                            content=assistant_text,
+                            timestamp=datetime.now(),
+                            identity=self._session.identity if self._session else Identity.MINDSONG
+                        )
+                        
+                        if self._session:
+                            self._session.messages.append(assistant_msg)
+                        
+                        if self._on_message:
+                            self._on_message(assistant_msg)
+                        self._set_status(
+                            ConnectionStatus.CONNECTED,
+                            f"Response received in {self._last_latency_ms}ms"
+                        )
+                        self._last_error_message = None
+                    else:
+                        self._handle_error("Empty response from Roxy")
+                        
+                except json.JSONDecodeError as e:
+                    # Maybe it's plain text?
+                    if response_text.strip():
+                        assistant_msg = ChatMessage(
+                            id=str(uuid.uuid4()),
+                            role="assistant",
+                            content=response_text,
+                            timestamp=datetime.now()
+                        )
+                        if self._session:
+                            self._session.messages.append(assistant_msg)
+                        if self._on_message:
+                            self._on_message(assistant_msg)
+                        self._set_status(
+                            ConnectionStatus.CONNECTED,
+                            f"Response received in {self._last_latency_ms}ms"
+                        )
+                        self._last_error_message = None
+                    else:
+                        self._handle_error(f"Invalid response: {e}")
             else:
-                self._handle_error("Empty response from ROXY harness")
-
+                    self._handle_error("No response from local Ollama")
+                
         except Exception as e:
             print(f"[ChatService] Error: {e}")
             self._handle_error(str(e))
-
-    def _emit_assistant_message(
-        self,
-        content: str,
-        model: str = "",
-        latency_ms: int = 0,
-        memory_refs: Optional[List[str]] = None,
-        proposed_actions: Optional[List[str]] = None,
-        context_hash: str = "",
-        context_kernel_version: str = "",
-        context_kernel_hash: str = "",
-        context_kernel: Optional[Dict[str, Any]] = None,
-        source_health: Optional[Dict[str, Any]] = None,
-        token_budget: Optional[Dict[str, Any]] = None,
-        orico_counts: Optional[Dict[str, Any]] = None,
-        degraded_reasons: Optional[List[str]] = None,
-        harness_bypassed: bool = False,
-    ):
-        """Emit an assistant message with full harness metadata."""
-        assistant_msg = ChatMessage(
-            id=str(uuid.uuid4()),
-            role="assistant",
-            content=content,
-            timestamp=datetime.now(),
-            identity=self._session.identity if self._session else Identity.MINDSONG,
-            latency_ms=latency_ms,
-            model=model,
-            memory_refs=memory_refs or [],
-            proposed_actions=proposed_actions or [],
-            context_hash=context_hash,
-            context_kernel_version=context_kernel_version,
-            context_kernel_hash=context_kernel_hash,
-            context_kernel=context_kernel or {},
-            source_health=source_health or {},
-            token_budget=token_budget or {},
-            orico_counts=orico_counts or {},
-            degraded_reasons=degraded_reasons or [],
-            harness_bypassed=harness_bypassed,
-        )
-
-        if self._session:
-            self._session.messages.append(assistant_msg)
-
-        if self._on_message:
-            self._on_message(assistant_msg)
-        
-        # Phase 4: Auto-save after every assistant response
-        self.save_session()
-
-    def _handle_error(self, error: str, structured_data: Dict[str, Any] = None):
+    
+    def _handle_error(self, error: str):
         """Handle error response."""
         self._cancel_status_timeouts()
         self._pending_request_active = False
@@ -1169,30 +542,18 @@ class ChatService:
         if self._on_typing:
             self._on_typing(False)
         self._set_status(ConnectionStatus.ERROR, error)
-        if error == self._last_error_message and not structured_data:
+        if error == self._last_error_message:
             return
         self._last_error_message = error
-
-        # Phase 6: Auto-reconnect on connection errors
-        error_lower = error.lower()
-        is_connection_error = any(k in error_lower for k in [
-            "unreachable", "connection", "refused", "reset", "timeout",
-            "cannot connect", "failed to connect", "no route"
-        ])
-        if is_connection_error:
-            print(f"[ChatService] Connection error detected, triggering health check...")
-            GLib.timeout_add_seconds(2, lambda: self._ping_harness() or False)
-
         if self._on_message:
             error_msg = ChatMessage(
                 id=str(uuid.uuid4()),
                 role="system",
                 content=f"⚠️ {error}",
-                timestamp=datetime.now(),
-                structured_data=structured_data or {},
+                timestamp=datetime.now()
             )
             self._on_message(error_msg)
-
+    
     def _set_status(self, status: ConnectionStatus, message: str):
         """Update connection status."""
         self._status = status
@@ -1208,55 +569,72 @@ class ChatService:
 class VoiceService:
     """
     Service for future voice input/output.
-
+    
     Phase 1: Stub
     Phase 2: Push-to-talk → STT → Chat → TTS → Playback
+    
+    Endpoints to be implemented in a future local API:
+    - POST /api/voice/transcribe - Audio → Text
+    - POST /api/voice/speak - Text → Audio
     """
-
+    
     def __init__(self, chat_service: ChatService):
         self._chat = chat_service
         self._is_recording = False
         self._speak_mode = False  # Option B: speak button, not auto-speak
-
+        
         # Callbacks
         self._on_recording_change: Optional[Callable[[bool], None]] = None
         self._on_audio_play: Optional[Callable[[bytes], None]] = None
-
+    
     @property
     def is_recording(self) -> bool:
         return self._is_recording
-
+    
     @property
     def speak_mode(self) -> bool:
         return self._speak_mode
-
+    
     @speak_mode.setter
     def speak_mode(self, value: bool):
         """Toggle speak mode (Option B: manual button)."""
         self._speak_mode = value
         print(f"[VoiceService] Speak mode: {value}")
-
+    
     def start_recording(self):
         """Start recording (push-to-talk pressed)."""
+        # TODO: Phase 2 - Start microphone capture
         self._is_recording = True
         print("[VoiceService] Recording started (stub)")
         if self._on_recording_change:
             self._on_recording_change(True)
-
+    
     def stop_recording(self):
         """Stop recording and transcribe."""
+        # TODO: Phase 2 - Stop capture, send to /api/voice/transcribe
         self._is_recording = False
         print("[VoiceService] Recording stopped (stub)")
         if self._on_recording_change:
             self._on_recording_change(False)
-
+        
+        # Stub: simulate transcription result
+        # In Phase 2, this would call a local transcription endpoint
+        # then auto-submit to chat_service.send_message(transcript)
+    
     def speak(self, text: str):
         """Request TTS for text (Option B: manual speak button)."""
         if not self._speak_mode:
             print("[VoiceService] Speak mode disabled")
             return
+        
+        # TODO: Phase 2 - Call /api/voice/speak endpoint
         print(f"[VoiceService] Speak request (stub): {text[:50]}...")
-
+        
+        # In Phase 2:
+        # 1. POST /api/voice/speak with text
+        # 2. Get audio bytes back
+        # 3. Call self._on_audio_play(audio_bytes)
+    
     def set_callbacks(
         self,
         on_recording_change: Optional[Callable[[bool], None]] = None,

@@ -14,169 +14,15 @@
 @define-color mode_remote #3b82f6;
 @define-color mode_auto #a855f7;
 
-/* === MOSCore / LifePanel Control Surface Tokens === */
-@define-color moc_surface_0 #090d13;
-@define-color moc_surface_1 #101722;
-@define-color moc_surface_2 #151e2b;
-@define-color moc_surface_3 #1b2636;
-@define-color moc_ink_0 #f5f7fb;
-@define-color moc_ink_1 #d8e1ec;
-@define-color moc_ink_2 #8fa0b5;
-@define-color moc_line_0 #223044;
-@define-color moc_line_1 #31435a;
-@define-color moc_cyan #4fd6ff;
-@define-color moc_gold #f4c95d;
-@define-color moc_green #35d07f;
-@define-color moc_amber #f5b64a;
-@define-color moc_red #f06464;
-@define-color moc_purple #b18cff;
-
-.moc-surface {
-    background-color: @moc_surface_0;
-    color: @moc_ink_1;
-}
-
-.moc-panel,
-.moc-card,
-.moc-rail,
-.moc-inspector {
-    background-color: alpha(@moc_surface_2, 0.92);
-    border: 1px solid alpha(@moc_line_1, 0.76);
-    border-radius: 8px;
-    color: @moc_ink_1;
-}
-
-.moc-panel,
-.moc-rail,
-.moc-inspector {
-    padding: 14px;
-}
-
-.moc-card {
-    padding: 16px;
-}
-
-.moc-rail {
-    background-color: alpha(@moc_surface_1, 0.96);
-}
-
-.moc-mission-canvas {
-    background-color: alpha(@moc_surface_0, 0.5);
-}
-
-.moc-object-row,
-.moc-procedure-row {
-    background-color: alpha(@moc_surface_3, 0.55);
-    border: 1px solid alpha(@moc_line_0, 0.82);
-    border-radius: 6px;
-    padding: 10px;
-    margin: 3px 0;
-}
-
-.moc-object-row:hover,
-.moc-procedure-row:hover {
-    background-color: alpha(@moc_surface_3, 0.82);
-    border-color: alpha(@moc_cyan, 0.42);
-}
-
-.moc-row-title {
-    color: @moc_ink_0;
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.moc-row-value {
-    color: @moc_cyan;
-    font-family: monospace;
-    font-size: 16px;
-    font-weight: 700;
-}
-
-.moc-row-subtitle {
-    color: @moc_ink_2;
-    font-size: 11px;
-}
-
-.moc-chip,
-.moc-chip-success,
-.moc-chip-warning,
-.moc-chip-danger,
-.moc-chip-info,
-.moc-chip-regent {
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 700;
-    padding: 3px 9px;
-}
-
-.moc-chip-success {
-    background-color: alpha(@moc_green, 0.18);
-    color: @moc_green;
-}
-
-.moc-chip-warning {
-    background-color: alpha(@moc_amber, 0.2);
-    color: @moc_amber;
-}
-
-.moc-chip-danger {
-    background-color: alpha(@moc_red, 0.18);
-    color: @moc_red;
-}
-
-.moc-chip-info {
-    background-color: alpha(@moc_cyan, 0.16);
-    color: @moc_cyan;
-}
-
-.moc-chip-regent {
-    background-color: alpha(@moc_gold, 0.18);
-    color: @moc_gold;
-}
-
-.moc-section-label {
-    color: @moc_ink_2;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-}
-
-.overview-card.status-healthy,
-.moc-object-row.status-healthy,
-.moc-procedure-row.status-healthy,
-.moc-panel.status-healthy {
-    border-left: 3px solid @moc_green;
-}
-
-.overview-card.status-warn,
-.moc-object-row.status-warn,
-.moc-procedure-row.status-warn,
-.moc-panel.status-warn {
-    border-left: 3px solid @moc_amber;
-}
-
-.overview-card.status-blocked,
-.moc-object-row.status-blocked,
-.moc-procedure-row.status-blocked,
-.moc-panel.status-blocked {
-    border-left: 3px solid @moc_red;
-}
-
 /* === Window === */
 window.roxy-command-center {
-    background-color: @moc_surface_0;
-    color: @moc_ink_1;
+    background-color: @window_bg_color;
 }
 
 /* === Navigation Sidebar === */
-.main-navigation,
-.content-stack {
-    background-color: @moc_surface_0;
-}
-
 .navigation-sidebar {
-    background-color: @moc_surface_1;
-    border-right: 1px solid @moc_line_0;
+    background-color: @sidebar_bg_color;
+    border-right: 1px solid @borders;
 }
 
 .nav-button {
@@ -186,12 +32,12 @@ window.roxy-command-center {
 }
 
 .nav-button:checked {
-    background-color: alpha(@moc_cyan, 0.14);
-    color: @moc_cyan;
+    background-color: alpha(@accent_bg_color, 0.15);
+    color: @accent_color;
 }
 
 .nav-button:hover:not(:checked) {
-    background-color: alpha(@moc_ink_1, 0.07);
+    background-color: alpha(@view_fg_color, 0.07);
 }
 
 .nav-badge {
@@ -298,15 +144,14 @@ window.roxy-command-center {
 
 /* === Service Card === */
 .service-card {
-    background-color: alpha(@moc_surface_2, 0.92);
-    border: 1px solid alpha(@moc_line_0, 0.75);
-    border-radius: 8px;
+    background-color: @card_bg_color;
+    border-radius: 12px;
     padding: 16px;
     margin: 8px;
 }
 
 .service-card:hover {
-    background-color: alpha(@moc_surface_3, 0.9);
+    background-color: alpha(@view_fg_color, 0.04);
 }
 
 .service-status-icon {
@@ -355,9 +200,8 @@ window.roxy-command-center {
 
 /* === GPU Card === */
 .gpu-card {
-    background-color: alpha(@moc_surface_2, 0.92);
-    border: 1px solid alpha(@moc_line_0, 0.75);
-    border-radius: 8px;
+    background-color: @card_bg_color;
+    border-radius: 12px;
     padding: 16px;
     margin: 8px;
 }
@@ -436,9 +280,8 @@ progressbar.usage-low progress {
 }
 
 .stat-card {
-    background-color: alpha(@moc_surface_2, 0.92);
-    border: 1px solid alpha(@moc_line_0, 0.75);
-    border-radius: 8px;
+    background-color: @card_bg_color;
+    border-radius: 12px;
     padding: 16px;
     margin: 4px;
 }
@@ -478,15 +321,14 @@ progressbar.usage-low progress {
 }
 
 .model-card {
-    background-color: alpha(@moc_surface_2, 0.92);
-    border: 1px solid alpha(@moc_line_0, 0.75);
+    background-color: @card_bg_color;
     border-radius: 8px;
     padding: 12px;
     margin: 4px 0;
 }
 
 .model-card:hover {
-    background-color: alpha(@moc_surface_3, 0.9);
+    background-color: alpha(@view_fg_color, 0.04);
 }
 
 .model-name {
@@ -563,38 +405,35 @@ progressbar.usage-low progress {
 }
 
 .overview-card {
-    background-color: alpha(@moc_surface_2, 0.92);
-    border: 1px solid alpha(@moc_line_0, 0.75);
-    border-radius: 8px;
+    background-color: @card_bg_color;
+    border-radius: 16px;
     padding: 20px;
     min-height: 120px;
 }
 
 .overview-card:hover {
-    background-color: alpha(@moc_surface_3, 0.9);
+    background-color: alpha(@view_fg_color, 0.04);
 }
 
 .overview-title {
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 500;
     margin-bottom: 8px;
-    color: @moc_ink_1;
 }
 
 .overview-value {
     font-size: 32px;
     font-weight: bold;
-    color: @moc_ink_0;
 }
 
 .overview-subtitle {
     font-size: 12px;
-    color: @moc_ink_2;
+    color: @dim_label_color;
 }
 
 /* === Graphs === */
 .graph-widget {
-    background-color: alpha(@moc_surface_0, 0.55);
+    background-color: alpha(@view_fg_color, 0.03);
     border-radius: 8px;
     min-height: 80px;
 }
@@ -689,93 +528,6 @@ scrollbar slider:hover {
     border-color: @borders;
 }
 
-/* === Device Cards (Performance Page) === */
-.device-card {
-    background-color: @card_bg_color;
-    border-radius: 12px;
-    padding: 12px;
-    min-height: 100px;
-    border-left: 3px solid transparent;
-}
-
-.device-card.status-healthy {
-    border-left-color: @success_color;
-}
-
-.device-card.status-warn {
-    border-left-color: @warning_color;
-}
-
-.device-card.status-blocked {
-    border-left-color: @error_color;
-}
-
-.device-title {
-    font-size: 13px;
-    font-weight: 500;
-}
-
-.device-value {
-    font-size: 24px;
-    font-weight: bold;
-}
-
-.device-subtitle {
-    font-size: 11px;
-    color: @dim_label_color;
-}
-
-/* === Agent Badges === */
-.agent-active {
-    background-color: alpha(@success_color, 0.08);
-}
-
-.agent-idle {
-    background-color: alpha(@warning_color, 0.08);
-}
-
-.agent-abandoned {
-    background-color: alpha(@error_color, 0.08);
-}
-
-/* === Process Tables === */
-.process-header {
-    background-color: alpha(@view_fg_color, 0.03);
-    border-radius: 6px;
-    padding: 4px;
-}
-
-.process-row {
-    padding: 2px 4px;
-    border-radius: 4px;
-}
-
-.process-row:hover {
-    background-color: alpha(@view_fg_color, 0.04);
-}
-
-.process-suspicious {
-    background-color: alpha(@error_color, 0.08);
-    border-left: 2px solid @error_color;
-}
-
-.monospace-small {
-    font-family: monospace;
-    font-size: 11px;
-}
-
-.status-healthy-text {
-    color: @success_color;
-}
-
-.status-warn-text {
-    color: @warning_color;
-}
-
-.status-blocked-text {
-    color: @error_color;
-}
-
 /* === Inbox Thread Row === */
 .inbox-thread-row {
     border-radius: 8px;
@@ -816,9 +568,8 @@ button.pill {
 }
 
 .user-bubble {
-    background-color: alpha(@moc_surface_3, 0.85);
-    color: @moc_ink_0;
-    border-left: 3px solid @moc_gold;
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
     border-bottom-right-radius: 4px;
 }
 
@@ -891,301 +642,4 @@ label.accent {
 .execute-column progressbar progress {
     border-radius: 4px;
     background-color: @accent_bg_color;
-}
-
-/* === Compact Mode (GWD 15" 1920×1080) === */
-window.compact-mode .navigation-sidebar {
-    min-width: 160px;
-}
-
-window.compact-mode .nav-button {
-    padding: 6px 8px;
-    min-height: 32px;
-    font-size: 12px;
-}
-
-window.compact-mode .nav-button image {
-    -gtk-icon-size: 16px;
-}
-
-window.compact-mode .title-2 {
-    font-size: 16px;
-}
-
-window.compact-mode .triage-column {
-    min-width: 240px;
-}
-
-window.compact-mode .talk-column {
-    min-width: 300px;
-}
-
-window.compact-mode .inbox-thread-row {
-    padding: 4px 0;
-}
-
-window.compact-mode .chat-bubble {
-    padding: 6px 10px;
-}
-
-window.compact-mode .progression-card {
-    padding: 8px;
-}
-
-window.compact-mode .overview-card {
-    padding: 10px;
-    min-height: 80px;
-}
-
-/* card-grid spacing handled in widget code */
-
-/* === V5 Agent Operating Console — Health Bar === */
-.health-good {
-    background-color: @moc_green;
-    border-radius: 4px;
-}
-
-.health-warn {
-    background-color: @moc_amber;
-    border-radius: 4px;
-}
-
-.health-bad {
-    background-color: @moc_red;
-    border-radius: 4px;
-}
-
-/* === Mission Dashboard — Civilization OS === */
-.mission-dashboard-page {
-    background-color: @moc_surface_0;
-}
-
-.mission-health-bar trough {
-    background-color: alpha(@moc_line_0, 0.6);
-    border-radius: 3px;
-    min-height: 4px;
-}
-
-.mission-health-bar progress {
-    background-color: @moc_cyan;
-    border-radius: 3px;
-    min-height: 4px;
-}
-
-.mission-dashboard-page .moc-card {
-    min-width: 280px;
-    transition: background-color 150ms ease;
-}
-
-.mission-dashboard-page .moc-card:hover {
-    background-color: alpha(@moc_surface_3, 0.85);
-}
-
-.mission-dashboard-page .moc-card.status-healthy {
-    border-left: 3px solid @moc_green;
-}
-
-.mission-dashboard-page .moc-card.status-warn {
-    border-left: 3px solid @moc_amber;
-}
-
-.mission-dashboard-page .moc-card.status-blocked {
-    border-left: 3px solid @moc_red;
-}
-
-/* Lane Selector (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1) */
-.lane-selector-box {
-    background-color: alpha(@moc_surface_2, 0.6);
-    border-radius: 8px;
-    padding: 6px 10px;
-}
-
-.lane-health-chip {
-    font-size: 0.8em;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background-color: alpha(@moc_surface_3, 0.5);
-}
-
-.lane-health-chip.healthy {
-    color: @moc_green;
-}
-
-.lane-health-chip.unhealthy {
-    color: @moc_red;
-}
-
-.lane-health-chip.cloud {
-    color: @moc_cyan;
-}
-
-/* === RCC Command Kernel Badges === */
-
-.tier-t0 {
-    background-color: alpha(@moc_green, 0.2);
-    color: @moc_green;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 700;
-    font-family: monospace;
-}
-
-.tier-t1 {
-    background-color: alpha(@moc_amber, 0.2);
-    color: @moc_amber;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 700;
-    font-family: monospace;
-}
-
-.tier-t2 {
-    background-color: alpha(@moc_red, 0.2);
-    color: @moc_red;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 700;
-    font-family: monospace;
-}
-
-.tier-t3 {
-    background-color: alpha(#ff4444, 0.3);
-    color: #ff4444;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 700;
-    font-family: monospace;
-}
-
-.world-stage {
-    background-color: alpha(@moc_cyan, 0.15);
-    color: @moc_cyan;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.world-moon {
-    background-color: alpha(@moc_purple, 0.15);
-    color: @moc_purple;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.world-backlot {
-    background-color: alpha(@moc_ink_2, 0.2);
-    color: @moc_ink_2;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.world-shared {
-    background-color: alpha(@moc_gold, 0.15);
-    color: @moc_gold;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-
-/* === Operator Safety Rail — Mission Center mini telemetry === */
-.safety-rail {
-    background-color: alpha(@moc_surface_1, 0.85);
-    border-bottom: 1px solid alpha(@moc_line_0, 0.6);
-    padding: 10px;
-}
-
-.safety-rail-title {
-    font-size: 13px;
-    font-weight: 700;
-    color: @moc_ink_1;
-    margin-bottom: 8px;
-}
-
-.safety-metric-row {
-    padding: 5px 6px;
-    border-radius: 6px;
-    margin: 2px 0;
-}
-
-.safety-metric-row:hover {
-    background-color: alpha(@moc_surface_3, 0.5);
-}
-
-.safety-metric-name {
-    font-size: 11px;
-    font-weight: 600;
-    color: @moc_ink_2;
-    min-width: 64px;
-}
-
-.safety-metric-value {
-    font-size: 12px;
-    font-weight: 700;
-    color: @moc_ink_0;
-    min-width: 42px;
-}
-
-.safety-metric-subtitle {
-    font-size: 10px;
-    color: @moc_ink_2;
-}
-
-.safety-metric-status-ready {
-    color: @moc_green;
-}
-
-.safety-metric-status-warn {
-    color: @moc_amber;
-}
-
-.safety-metric-status-off {
-    color: alpha(@moc_ink_2, 0.6);
-}
-
-.safety-metric-status-error {
-    color: @moc_red;
-}
-
-.safety-sparkline {
-    min-height: 18px;
-    min-width: 48px;
-}
-
-/* Route truth badge chips */
-.route-chip {
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.route-chip-ready {
-    background-color: alpha(@moc_green, 0.15);
-    color: @moc_green;
-}
-
-.route-chip-warn {
-    background-color: alpha(@moc_amber, 0.15);
-    color: @moc_amber;
-}
-
-.route-chip-off {
-    background-color: alpha(@moc_ink_2, 0.1);
-    color: alpha(@moc_ink_2, 0.7);
-}
-
-.route-chip-error {
-    background-color: alpha(@moc_red, 0.15);
-    color: @moc_red;
 }

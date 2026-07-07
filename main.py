@@ -15,48 +15,27 @@ import os
 import json
 import signal
 import faulthandler
-import time
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
 # Import all components
 from daemon_client import DaemonClient, normalize_status
-from services.factory_truth_service import get_factory_truth_service
-from services.roxy_status_provider import proof_browser_status
 from ui.header_bar import HeaderBar
 from ui.navigation import MainNavigation
 from ui.settings import SettingsPage
-from widgets.mission_dashboard_page import MissionDashboardPage
-from widgets.orchestrator_panel import OrchestratorPanel
+from widgets.home_console_page import HomeConsolePage
 from widgets.overview_page import OverviewPage
 from widgets.services_page import ServicesPage
 from widgets.gpus_page import GpusPage
-from widgets.roxy_status_page import RoxyStatusPage
-from widgets.mos_cockpit_page import MOSCockpitPage
 from widgets.ollama_panel import OllamaPanel
 from widgets.alert_panel import AlertPanel
 from widgets.terminal_pane import TerminalPage
-from widgets.performance_page import PerformancePage
-from widgets.apps_page import AppsPage
-from widgets.agents_page import AgentsPage
-from widgets.brain_page import BrainPage
-from widgets.executive_page import ExecutivePage
-from widgets.voice_actions_page import VoiceActionsPage
-from widgets.content_business_page import ContentBusinessPage
-from widgets.receipts_proof_page import ReceiptsProofPage
-from widgets.storage_hygiene_page import StorageHygienePage
-from widgets.rcc_command_page import RCCCommandPage
 from services.alert_manager import get_alert_manager
 from services.ollama_control import get_ollama_control, OllamaAction, ActionResult
-from services.profile_config import load_profile, profile_allows_page
-from services.telemetry_collector import get_collector
 
-APP_ID = "org.roxy.CommandCenter.Phase2CReview"
+APP_ID = "org.roxy.CommandCenter"
 CSS_PATH = Path(__file__).parent / "styles" / "custom.css"
-APP_FLAGS = getattr(Gio.ApplicationFlags, "DEFAULT_FLAGS", None)
-if APP_FLAGS is None:
-    APP_FLAGS = Gio.ApplicationFlags.FLAGS_NONE
 
 
 class RoxyCommandCenter(Adw.Application):
@@ -65,7 +44,7 @@ class RoxyCommandCenter(Adw.Application):
     def __init__(self):
         super().__init__(
             application_id=APP_ID,
-            flags=APP_FLAGS
+            flags=Gio.ApplicationFlags.DEFAULT_FLAGS
         )
         self.window: Optional['MainWindow'] = None
         self._signal_handler_ids: List[int] = []
@@ -246,33 +225,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.app = app
         self.add_css_class("roxy-command-center")
         print("[MainWindow] Window class initialized")
-
-        self.profile = load_profile()
-        print(f"[MainWindow] Active profile: {self.profile.get('profileId')}")
         
         # Window properties
-        self.set_title(self.profile.get("displayName") or "Roxy Command Center")
+        self.set_title("Roxy Command Center")
         self.set_default_size(1280, 800)
         self.set_size_request(800, 600)
         print("[MainWindow] Window properties set")
-        
-        # Detect small-screen monitor (e.g. GWD 15" 1920×1080) and apply compact mode
-        self._compact_mode = os.getenv("ROXY_CC_COMPACT", "0") == "1"
-        self._target_monitor = None
-        self.connect("realize", self._on_window_realize)
-        if self._compact_mode:
-            self.add_css_class("compact-mode")
-            print("[MainWindow] Compact mode enabled (GWD/small screen)")
         
         # Data
         self._daemon_client = DaemonClient()
         self._current_data: dict = {}
         self._poll_source_id: Optional[int] = None
-        self._is_visible = True
-        self._refresh_interval_ms = 5000
-        self._fetch_pending = False
-        self._last_ui_update_at = 0.0
-        self._min_ui_update_interval_s = 1.0
         print("[MainWindow] Data structures initialized")
         
         # Initialize alert manager with app
@@ -285,13 +248,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._build_ui()
         print("[MainWindow] UI built successfully")
         
-        # Visibility detection for adaptive refresh
-        self.connect("notify::visible", self._on_visibility_changed)
-        
-        # Live polling for real-time telemetry and sparkline history.
-        # Adaptive: 5s when visible, 30s when backgrounded.
-        print("[MainWindow] Starting live polling...")
-        self._start_polling(5000)
+        # Initial manual snapshot only. This review build avoids background
+        # polling so ROXY's low-idle state stays quiet.
+        print("[MainWindow] Fetching initial manual snapshot...")
+        self._fetch_data()
         print("[MainWindow] ========== INIT COMPLETE ==========")
     
     def _build_ui(self):
@@ -308,263 +268,65 @@ class MainWindow(Adw.ApplicationWindow):
         self.header = HeaderBar(
             on_settings=self._show_settings
         )
-        if hasattr(self.header, "title_label"):
-            self.header.title_label.set_label(self.profile.get("displayName") or "Roxy Command Center")
-        self._set_profile_header()
         main_box.append(self.header.get_widget())
         
         # Navigation + content
-        visible_pages = None
-        enabled_pages = self.profile.get("enabledPages") or []
-        if enabled_pages:
-            visible_pages = set(enabled_pages)
-        self.navigation = MainNavigation(visible_pages=visible_pages)
+        self.navigation = MainNavigation()
         self.navigation.set_vexpand(True)
         main_box.append(self.navigation)
         
         # Add pages
         self._setup_pages()
-        self.navigation.stack.connect("notify::visible-child-name", self._on_visible_page_changed)
         
-        # Civilization OS opens on Mission Dashboard so the operator sees
-        # institutional state first; Chat remains available for natural talk.
-        start_page = os.getenv("ROXY_CC_START_PAGE", self._default_start_page())
-        if not self._page_allowed(start_page):
-            start_page = self._default_start_page()
-        self.navigation.navigate_to(start_page)
-
-    def _page_allowed(self, page_id: str) -> bool:
-        return profile_allows_page(self.profile, page_id)
-
-    def _default_start_page(self) -> str:
-        enabled = self.profile.get("enabledPages") or []
-        return enabled[0] if enabled else "missions"
-
-    def _set_profile_header(self):
-        source = "true" if self.profile.get("sourceAuthority") is True else "false"
-        label = self.profile.get("modeLabel") or self.profile.get("profileId") or "LOCAL"
-        self.header.set_subtitle(f"{label} | sourceAuthority={source}")
+        # Navigate to HOME (the cockpit)
+        self.navigation.navigate_to("home")
     
     def _setup_pages(self):
-        """Set up navigation pages — LifePanel layout."""
-        # Mission Dashboard — the new civilization command center (default)
-        if self._page_allowed("missions"):
-            self.missions_page = MissionDashboardPage(
-                on_navigate=self._on_navigate,
-                on_chat=self._on_quick_chat
-            )
-            self.navigation.add_page("missions", "Missions", self.missions_page, "target-symbolic")
-        else:
-            self.missions_page = None
-
-        # Orchestrator — pending actions, queued jobs, recent outcomes
-        if self._page_allowed("orchestrator"):
-            self.orchestrator_page = OrchestratorPanel()
-            self.navigation.add_page("orchestrator", "Orchestrator", self.orchestrator_page, "system-run-symbolic")
-        else:
-            self.orchestrator_page = None
-
-        # Home Console — lazy, because it owns chat connection setup and review
-        # build triage placeholders.
-        self.home_page = None
-        if self._page_allowed("home"):
-            self.navigation.add_lazy_page("home", "Chat", self._build_home_page, "go-home-symbolic")
+        """Set up navigation pages."""
+        # Home Console - THE COCKPIT (default landing)
+        self.home_page = HomeConsolePage(
+            on_navigate=self._on_navigate
+        )
+        self.navigation.add_page("home", "Home", self.home_page, "go-home-symbolic")
         
-        # Overview — LifePanel home
-        if self._page_allowed("overview"):
-            self.overview_page = OverviewPage(on_navigate=self._on_navigate)
-            self.navigation.add_page("overview", "Overview", self.overview_page, "view-grid-symbolic")
-        else:
-            self.overview_page = None
+        # Overview page (telemetry dashboard)
+        self.overview_page = OverviewPage(
+            on_navigate=self._on_navigate
+        )
+        self.navigation.add_page("overview", "Overview", self.overview_page, "view-grid-symbolic")
         
-        # Performance
-        if self._page_allowed("performance"):
-            self.performance_page = PerformancePage()
-            self.navigation.add_page("performance", "Performance", self.performance_page, "preferences-system-symbolic")
-        else:
-            self.performance_page = None
+        # Services page
+        self.services_page = ServicesPage()
+        self.navigation.add_page("services", "Services", self.services_page, "system-run-symbolic")
         
-        # Apps
-        if self._page_allowed("apps"):
-            self.apps_page = AppsPage()
-            self.navigation.add_page("apps", "Apps", self.apps_page, "applications-utilities-symbolic")
-        else:
-            self.apps_page = None
+        # GPUs page
+        self.gpus_page = GpusPage()
+        self.navigation.add_page("gpus", "GPUs", self.gpus_page, "video-display-symbolic")
         
-        # Agents
-        if self._page_allowed("agents"):
-            self.agents_page = AgentsPage()
-            self.navigation.add_page("agents", "Agents", self.agents_page, "applications-games-symbolic")
-        else:
-            self.agents_page = None
+        # Ollama page
+        self.ollama_page = OllamaPanel(
+            on_model_unload=self._on_ollama_unload,
+            on_refresh=self._fetch_data
+        )
+        self.navigation.add_page("ollama", "Ollama", self.ollama_page, "face-smile-big-symbolic")
         
-        # Brain
-        if self._page_allowed("brain"):
-            self.brain_page = BrainPage()
-            self.navigation.add_page("brain", "Brain", self.brain_page, "preferences-system-symbolic")
-        else:
-            self.brain_page = None
+        # Alerts page
+        self.alerts_page = AlertPanel()
+        self.navigation.add_page("alerts", "Alerts", self.alerts_page, "dialog-warning-symbolic")
         
-        # Executive
-        if self._page_allowed("executive"):
-            self.executive_page = ExecutivePage()
-            self.navigation.add_page("executive", "Executive", self.executive_page, "emblem-ok-symbolic")
-        else:
-            self.executive_page = None
+        # Terminal page
+        self.terminal_page = TerminalPage()
+        self.navigation.add_page("terminal", "Terminal", self.terminal_page, "utilities-terminal-symbolic")
         
-        # Voice / Actions
-        if self._page_allowed("voice_actions"):
-            self.voice_actions_page = VoiceActionsPage()
-            self.navigation.add_page("voice_actions", "Voice / Actions", self.voice_actions_page, "audio-input-microphone-symbolic")
-        else:
-            self.voice_actions_page = None
-        
-        # Content
-        if self._page_allowed("content"):
-            self.content_page = ContentBusinessPage()
-            self.navigation.add_page("content", "Content", self.content_page, "folder-music-symbolic")
-        else:
-            self.content_page = None
-        
-        # Receipts / Proof
-        if self._page_allowed("receipts"):
-            self.receipts_page = ReceiptsProofPage()
-            self.navigation.add_page("receipts", "Receipts", self.receipts_page, "emblem-ok-symbolic")
-        else:
-            self.receipts_page = None
-        
-        # Storage / Hygiene
-        if self._page_allowed("storage"):
-            self.storage_page = StorageHygienePage()
-            self.navigation.add_page("storage", "Storage", self.storage_page, "drive-harddisk-symbolic")
-        else:
-            self.storage_page = None
-        
-        # Services
-        if self._page_allowed("services"):
-            self.services_page = ServicesPage()
-            self.navigation.add_page("services", "Services", self.services_page, "system-run-symbolic")
-        else:
-            self.services_page = None
-        
-        # GPUs
-        if self._page_allowed("gpus"):
-            self.gpus_page = GpusPage()
-            self.navigation.add_page("gpus", "GPUs", self.gpus_page, "video-display-symbolic")
-        else:
-            self.gpus_page = None
-
-        # RCC Command Kernel — canonical command surface
-        self.rcc_page = RCCCommandPage()
-        self.navigation.add_page("rcc", "RCC Commands", self.rcc_page, "applications-system-symbolic")
-
-        # Roxy Status
-        if self._page_allowed("roxy_status"):
-            self.roxy_status_page = RoxyStatusPage()
-            self.navigation.add_page("roxy_status", "Roxy Status", self.roxy_status_page, "emblem-ok-symbolic")
-        else:
-            self.roxy_status_page = None
-
-        # MOS Cockpit
-        if self._page_allowed("mos_cockpit"):
-            self.mos_cockpit_page = MOSCockpitPage()
-            self.navigation.add_page("mos_cockpit", "MOS Cockpit", self.mos_cockpit_page, "network-workgroup-symbolic")
-        else:
-            self.mos_cockpit_page = None
-        
-        # Ollama
-        if self._page_allowed("ollama"):
-            self.ollama_page = OllamaPanel(
-                on_model_unload=self._on_ollama_unload,
-                on_refresh=self._fetch_data
-            )
-            self.navigation.add_page("ollama", "Ollama", self.ollama_page, "face-smile-big-symbolic")
-        else:
-            self.ollama_page = None
-        
-        # Alerts
-        if self._page_allowed("alerts"):
-            self.alerts_page = AlertPanel()
-            self.navigation.add_page("alerts", "Alerts", self.alerts_page, "dialog-warning-symbolic")
-        else:
-            self.alerts_page = None
-        
-        # Terminal
-        if self._page_allowed("terminal"):
-            self.terminal_page = TerminalPage()
-            self.navigation.add_page("terminal", "Terminal", self.terminal_page, "utilities-terminal-symbolic")
-        else:
-            self.terminal_page = None
-        
-        # Settings
-        if self._page_allowed("settings"):
-            self.settings_page = SettingsPage(on_setting_changed=self._on_setting_changed)
-            self.navigation.add_page("settings", "Settings", self.settings_page, "emblem-system-symbolic")
-        else:
-            self.settings_page = None
-
-    def _build_home_page(self):
-        """Build the operator chat page on demand."""
-        from widgets.home_console_page import HomeConsolePage
-        self.home_page = HomeConsolePage(on_navigate=self._on_navigate)
-        return self.home_page
-
-    def _on_quick_chat(self, text: str):
-        """Handle quick chat from mission dashboard command bar."""
-        print(f"[MainWindow] Quick chat: {text[:80]}...")
-        # Navigate to chat and inject the message
-        self.navigation.navigate_to("home")
-        if self.home_page is not None:
-            # The home page may need to expose a method to inject messages
-            # For now, log it
-            pass
+        # Settings page
+        self.settings_page = SettingsPage(
+            on_setting_changed=self._on_setting_changed
+        )
+        self.navigation.add_page("settings", "Settings", self.settings_page, "emblem-system-symbolic")
     
     def _on_navigate(self, page_id: str):
-        """Handle navigation from overview cards or sidebar.
-        
-        Immediately hydrate the newly visible page with current data
-        so it doesn't sit at zeros until the next timer tick.
-        """
+        """Handle navigation from overview cards."""
         self.navigation.navigate_to(page_id)
-        
-        if self._current_data:
-            self._hydrate_current_page(self._current_data)
-
-    def _on_visible_page_changed(self, stack, param):
-        """Hydrate pages selected through the sidebar after the initial snapshot."""
-        if self._current_data:
-            self._hydrate_current_page(self._current_data)
-
-    def _hydrate_current_page(self, data: dict):
-        """Update the selected heavy page from the latest cached snapshot."""
-        visible_name = self.navigation.get_current_page()
-        page_map = {
-            "performance": self.performance_page,
-            "apps": self.apps_page,
-            "agents": self.agents_page,
-            "brain": self.brain_page,
-            "executive": self.executive_page,
-            "voice_actions": self.voice_actions_page,
-            "content": self.content_page,
-            "receipts": self.receipts_page,
-            "storage": self.storage_page,
-            "services": self.services_page,
-            "gpus": self.gpus_page,
-            "roxy_status": self.roxy_status_page,
-            "mos_cockpit": self.mos_cockpit_page,
-            "ollama": self.ollama_page,
-            "alerts": self.alerts_page,
-            "terminal": self.terminal_page,
-        }
-        page_map = {key: page for key, page in page_map.items() if page is not None}
-        if visible_name == "missions" and self.missions_page is not None:
-            self.missions_page.update(data)
-        elif visible_name == "overview" and self.overview_page is not None:
-            self.overview_page.update(data)
-        elif visible_name == "home" and self.home_page is not None:
-            self.home_page.update(data)
-        elif visible_name in page_map:
-            page_map[visible_name].update(data)
     
     def _show_settings(self):
         """Show settings page."""
@@ -597,12 +359,10 @@ class MainWindow(Adw.ApplicationWindow):
             print(f"[MainWindow] Toast: {message}")
     
     def _start_polling(self, interval_ms: int = 5000):
-        """Start adaptive polling: 5s visible, 30s background."""
+        """Take a one-time snapshot; periodic polling is disabled."""
         self._stop_polling()
-        self._refresh_interval_ms = interval_ms if self._is_visible else 30000
-        self._fetch_data(force=True)
-        self._poll_source_id = GLib.timeout_add(self._refresh_interval_ms, self._on_poll_timer)
-        print(f"[MainWindow] Polling: {self._refresh_interval_ms}ms (visible={self._is_visible})")
+        self._fetch_data()
+        print("[MainWindow] Manual snapshot complete; background polling disabled")
     
     def _stop_polling(self):
         """Stop daemon polling."""
@@ -611,59 +371,17 @@ class MainWindow(Adw.ApplicationWindow):
             self._poll_source_id = None
     
     def _restart_polling(self, interval_ms: int = None):
-        """Restart polling with adaptive interval."""
-        self._start_polling(interval_ms or 5000)
-    
-    def _on_visibility_changed(self, widget, param):
-        """Adapt refresh rate based on window visibility."""
-        visible = self.get_visible()
-        if visible != self._is_visible:
-            self._is_visible = visible
-            self._restart_polling()
-    
-    def _on_window_realize(self, widget):
-        """After window is realized, detect monitor and apply compact mode if needed."""
-        display = self.get_display()
-        if not display:
-            return
-        
-        surface = self.get_surface()
-        if not surface:
-            return
-        
-        # Check which monitor the window is on
-        monitor = display.get_monitor_at_surface(surface)
-        if monitor:
-            geom = monitor.get_geometry()
-            print(f"[MainWindow] On monitor: {geom.width}x{geom.height} at {geom.x},{geom.y}")
-            
-            # Auto-enable compact mode for small monitors (<= 1080 height)
-            if geom.height <= 1080 and not self._compact_mode:
-                self._compact_mode = True
-                self.add_css_class("compact-mode")
-                print(f"[MainWindow] Auto-compact: monitor height {geom.height}px")
-            
-            # If compact, still respect start page preference
-            if self._compact_mode:
-                start_page = os.getenv("ROXY_CC_START_PAGE", "home")
-                if not self._page_allowed(start_page):
-                    start_page = self._default_start_page()
-                print(f"[MainWindow] Compact mode: navigating to {start_page}")
-                GLib.idle_add(lambda: self.navigation.navigate_to(start_page) or False)
+        """Refresh one manual snapshot."""
+        self._start_polling(interval_ms or 0)
     
     def _on_poll_timer(self) -> bool:
         """Periodic poll callback."""
         self._fetch_data()
         return True  # Continue
     
-    def _fetch_data(self, force: bool = False):
+    def _fetch_data(self):
         """Fetch data from daemon."""
-        if self._fetch_pending:
-            return
-        self._fetch_pending = True
-
         def on_data(response):
-            self._fetch_pending = False
             # Handle DaemonResponse object
             if hasattr(response, 'data'):
                 raw_data = response.data if response.data else {}
@@ -675,57 +393,21 @@ class MainWindow(Adw.ApplicationWindow):
             if raw_data:
                 # Normalize to canonical schema
                 data = normalize_status(raw_data)
-                try:
-                    status_snap = get_factory_truth_service().get_status()
-                    data["factoryTruth"] = status_snap.as_dict()
-                except Exception as exc:
-                    data["factoryTruth"] = {
-                        "verdict": "UNKNOWN",
-                        "ready": {},
-                        "servicesById": {},
-                        "warnings": [f"factory.status unavailable: {exc}"],
-                        "errors": [],
-                    }
-                try:
-                    routes_snap = get_factory_truth_service().get_routes()
-                    data["factoryRoutes"] = routes_snap.as_dict()
-                except Exception as exc:
-                    data["factoryRoutes"] = {
-                        "verdict": "UNKNOWN",
-                        "routesById": {},
-                        "warnings": [f"factory.routes unavailable: {exc}"],
-                        "errors": [],
-                    }
-                try:
-                    data["proofBrowser"] = proof_browser_status()
-                except Exception as exc:
-                    data["proofBrowser"] = {
-                        "ok": False,
-                        "error": str(exc),
-                        "note": "HELPER_ONLY_NOT_FINAL_TRUTH",
-                    }
                 self._current_data = data
                 
-                # Accumulate telemetry history for sparklines
-                get_collector().push(data)
-                
-                now = time.monotonic()
-                if force or now - self._last_ui_update_at >= self._min_ui_update_interval_s:
-                    self._last_ui_update_at = now
-                    self._update_ui(data)
+                self._update_ui(data)
                 
                 # Update header mode
                 mode = data.get("mode", "local")
                 host = raw_data.get("remote_host", "")
                 self.header.set_mode(mode, host)
-                self._set_profile_header()
                 
                 # Update header debug strip
                 cpu_pct = data.get("cpu", {}).get("cpu_pct", 0)
                 gpu_count = len(data.get("gpus", []))
                 self.header.set_debug_info(cpu_pct, gpu_count)
                 
-                # Process alerts at poll cadence only. Manual duplicate callbacks are coalesced above.
+                # Process alerts
                 alert_manager = get_alert_manager()
                 alert_manager.process_daemon_data(raw_data)
                 
@@ -736,51 +418,25 @@ class MainWindow(Adw.ApplicationWindow):
         self._daemon_client.fetch_async(on_data)
     
     def _update_ui(self, data: dict):
-        """Update only the visible page + overview badges. Off-screen pages stay frozen.
+        """Update all UI components with new data."""
+        # Home Console
+        self.home_page.update(data)
         
-        GTK4 Stack shows one child at a time. Updating invisible pages wastes CPU
-        on Cairo sparklines, table rebuilds, and label repaints.
-        """
-        # Only the visible page gets heavy update (tables, graphs, process lists).
-        # Hidden pages with their own timers now self-skip when unmapped.
-        self._hydrate_current_page(data)
+        # Overview
+        self.overview_page.update(data)
         
-        # Nav badges always update (lightweight — just label text)
-        perf = data.get("performance", {})
-        agents = perf.get("agents", {})
-        abandoned = agents.get("abandoned", 0)
-        if abandoned > 0:
-            self.navigation.set_badge("agents", abandoned)
-        else:
-            self.navigation.set_badge("agents", 0)
+        # Services
+        self.services_page.update(data)
         
-        perf_status = perf.get("status", "")
-        if perf_status in ("warn", "blocked"):
-            self.navigation.set_badge("performance", 1)
-        else:
-            self.navigation.set_badge("performance", 0)
+        # GPUs
+        self.gpus_page.update(data)
         
-        # Brain badge if degraded
-        brain = data.get("brainAuthority", {})
-        if brain.get("status") != "healthy":
-            self.navigation.set_badge("brain", 1)
-        else:
-            self.navigation.set_badge("brain", 0)
-        
-        # Storage badge if swap > 80%
-        host_mem = data.get("hostMemory", {})
-        swap = host_mem.get("swap", {})
-        swap_total = swap.get("swapTotalGb", 0) or swap.get("totalGb", 1)
-        swap_used = swap.get("swapUsedGb", 0) or swap.get("usedGb", 0)
-        swap_pct = (swap_used / swap_total * 100) if swap_total > 0 else 0
-        if swap_pct > 80:
-            self.navigation.set_badge("storage", int(swap_pct))
-        else:
-            self.navigation.set_badge("storage", 0)
+        # Ollama
+        self.ollama_page.update(data)
     
     def refresh(self):
         """Manual refresh."""
-        self._fetch_data(force=True)
+        self._fetch_data()
     
     def do_close_request(self) -> bool:
         """Handle window close."""

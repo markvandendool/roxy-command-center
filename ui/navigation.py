@@ -8,7 +8,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
-from typing import Optional, Dict, Callable, Iterable
+from typing import Optional, Dict, Callable
 
 
 class NavigationSidebar(Gtk.Box):
@@ -22,17 +22,12 @@ class NavigationSidebar(Gtk.Box):
     - Badge support for alerts
     """
     
-    def __init__(
-        self,
-        on_navigate: Optional[Callable[[str], None]] = None,
-        visible_pages: Optional[Iterable[str]] = None
-    ):
+    def __init__(self, on_navigate: Optional[Callable[[str], None]] = None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.add_css_class("navigation-sidebar")
         self.set_size_request(200, -1)
         
         self.on_navigate = on_navigate
-        self._visible_pages = set(visible_pages) if visible_pages else None
         self._buttons: Dict[str, Gtk.ToggleButton] = {}
         self._current_page = ""
         
@@ -47,32 +42,18 @@ class NavigationSidebar(Gtk.Box):
         main_section.set_vexpand(True)
         self.append(main_section)
         
-        # Navigation items — Civilization OS layout
+        # Navigation items
         nav_items = [
-            ("missions", "target-symbolic", "Missions"),
-            ("home", "go-home-symbolic", "Chat"),
+            ("home", "go-home-symbolic", "Home"),
             ("overview", "view-grid-symbolic", "Overview"),
-            ("performance", "preferences-system-symbolic", "Performance"),
-            ("apps", "applications-utilities-symbolic", "Apps"),
-            ("agents", "applications-games-symbolic", "Agents"),
-            ("brain", "brain-symbolic" if False else "preferences-system-symbolic", "Brain"),
-            ("executive", "emblem-important-symbolic" if False else "emblem-ok-symbolic", "Executive"),
-            ("voice_actions", "audio-input-microphone-symbolic", "Voice / Actions"),
-            ("content", "folder-music-symbolic", "Content"),
-            ("receipts", "document-signed-symbolic" if False else "emblem-ok-symbolic", "Receipts"),
-            ("storage", "drive-harddisk-symbolic", "Storage"),
             ("services", "system-run-symbolic", "Services"),
             ("gpus", "video-display-symbolic", "GPUs"),
-            ("roxy_status", "emblem-ok-symbolic", "Roxy Status"),
-            ("mos_cockpit", "network-workgroup-symbolic", "MOS Cockpit"),
             ("ollama", "face-smile-big-symbolic", "Ollama"),
             ("alerts", "dialog-warning-symbolic", "Alerts"),
             ("terminal", "utilities-terminal-symbolic", "Terminal"),
         ]
         
         for page_id, icon_name, label in nav_items:
-            if self._visible_pages is not None and page_id not in self._visible_pages:
-                continue
             btn = self._create_nav_button(page_id, icon_name, label)
             main_section.append(btn)
         
@@ -83,9 +64,8 @@ class NavigationSidebar(Gtk.Box):
         main_section.append(sep)
         
         # Settings at bottom
-        if self._visible_pages is None or "settings" in self._visible_pages:
-            settings_btn = self._create_nav_button("settings", "emblem-system-symbolic", "Settings")
-            main_section.append(settings_btn)
+        settings_btn = self._create_nav_button("settings", "emblem-system-symbolic", "Settings")
+        main_section.append(settings_btn)
         
         # Footer with version
         footer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -177,14 +157,14 @@ class NavigationView:
     with back button support.
     """
     
-    def __init__(self, visible_pages: Optional[Iterable[str]] = None):
+    def __init__(self):
         self._widget = Adw.NavigationView()
         self._pages: Dict[str, Adw.NavigationPage] = {}
     
     def get_widget(self):
         return self._widget
     
-    def add_page(self, page_id: str, title: str, widget: Gtk.Widget):
+    def add_page(self, page_id: str, title: str, widget: Gtk.Widget) -> Adw.NavigationPage:
         """Add a page to the navigation view."""
         page = Adw.NavigationPage.new(widget, title)
         page.set_tag(page_id)
@@ -244,15 +224,12 @@ class MainNavigation(Gtk.Box):
     the sidebar with a content stack.
     """
     
-    def __init__(self, visible_pages: Optional[Iterable[str]] = None):
+    def __init__(self):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.add_css_class("main-navigation")
         
         # Sidebar
-        self.sidebar = NavigationSidebar(
-            on_navigate=self._on_sidebar_navigate,
-            visible_pages=visible_pages,
-        )
+        self.sidebar = NavigationSidebar(on_navigate=self._on_sidebar_navigate)
         self.append(self.sidebar)
         
         # Separator
@@ -284,39 +261,7 @@ class MainNavigation(Gtk.Box):
         # Check if lazy page needs building
         if page_id in self._page_builders:
             builder = self._page_builders.pop(page_id)
-            try:
-                widget = builder()
-            except Exception as exc:
-                # Render a visible error page instead of a silent black placeholder.
-                import traceback
-                widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-                widget.set_margin_top(24)
-                widget.set_margin_start(24)
-                widget.set_margin_end(24)
-                widget.set_margin_bottom(24)
-
-                title = Gtk.Label(label=f"⚠️ {page_id.title()} page failed to load")
-                title.add_css_class("title-2")
-                title.set_xalign(0)
-                widget.append(title)
-
-                detail = Gtk.Label(label=str(exc))
-                detail.add_css_class("error")
-                detail.set_xalign(0)
-                detail.set_wrap(True)
-                detail.set_selectable(True)
-                widget.append(detail)
-
-                trace = Gtk.TextView()
-                trace.set_editable(False)
-                trace.get_buffer().set_text(traceback.format_exc())
-                scrolled = Gtk.ScrolledWindow()
-                scrolled.set_vexpand(True)
-                scrolled.set_child(trace)
-                widget.append(scrolled)
-
-                print(f"[MainNavigation] Page {page_id!r} build failed: {exc}")
-                traceback.print_exc()
+            widget = builder()
             
             # Replace placeholder
             placeholder = self.stack._pages.get(page_id)

@@ -35,10 +35,6 @@ from services.chat_service import (
     Identity as ServiceIdentity,
     get_chat_service, get_voice_service
 )
-from services.orchestrator_truth_provider import OrchestratorTruthProvider
-from widgets.operator_safety_rail import OperatorSafetyRail
-from widgets.truth_badge import TruthBadge, TruthBadgeGroup
-from services.factory_truth_service import get_factory_truth_service
 
 
 
@@ -94,9 +90,6 @@ class ExecutionRun:
     started_at: Optional[datetime]
     progress_pct: Optional[int]
     can_cancel: bool = True
-    owner: str = ""           # e.g. regent-intent-router, operator
-    source: str = ""          # e.g. chat, ops_alert, github
-    receipt_path: str = ""    # path to canonical receipt
 
 
 @dataclass
@@ -106,46 +99,166 @@ class ChatMessage:
     role: str           # "user" or "assistant" or "system"
     content: str
     timestamp: datetime
-    # Roxy harness metadata
-    latency_ms: int = 0
-    model: str = ""
-    memory_refs: List[str] = None
-    proposed_actions: List[str] = None
-    # Context Inspector metadata (JARVIS Context Kernel)
-    context_hash: str = ""
-    context_kernel_version: str = ""
-    context_kernel_hash: str = ""
-    context_kernel: Dict[str, Any] = None
-    source_health: Dict[str, Any] = None
-    token_budget: Dict[str, Any] = None
-    orico_counts: Dict[str, Any] = None
-    degraded_reasons: List[str] = None
-    harness_bypassed: bool = False
-    # Structured data for error cards / evidence cards
-    structured_data: Dict[str, Any] = None
-
-    def __post_init__(self):
-        if self.memory_refs is None:
-            self.memory_refs = []
-        if self.proposed_actions is None:
-            self.proposed_actions = []
-        if self.source_health is None:
-            self.source_health = {}
-        if self.context_kernel is None:
-            self.context_kernel = {}
-        if self.token_budget is None:
-            self.token_budget = {}
-        if self.orico_counts is None:
-            self.orico_counts = {}
-        if self.degraded_reasons is None:
-            self.degraded_reasons = []
-        if self.structured_data is None:
-            self.structured_data = {}
 
 
 # =============================================================================
-# MOCK DATA STORE REMOVED — replaced by OrchestratorTruthProvider
+# MOCK DATA STORE (Until production orchestration endpoints are ready)
 # =============================================================================
+
+class MockDataStore:
+    """
+    Placeholder data for UI development.
+    TODO: Replace with production orchestration API calls.
+    
+    Future endpoints needed:
+    - GET /api/inbox/threads
+    - GET /api/inbox/threads/:id
+    - POST /api/inbox/threads/:id/reply
+    - POST /api/inbox/threads/:id/action
+    - GET /api/runs
+    - POST /api/runs/:id/dispatch
+    - POST /api/runs/:id/cancel
+    - GET /api/chat/history
+    - POST /api/chat/send
+    """
+    
+    # All 20 sources + system sources as placeholders
+    SOURCES = {
+        # Human messaging
+        "email_personal": ("mail-unread-symbolic", Identity.ME),
+        "email_business": ("mail-unread-symbolic", Identity.MINDSONG),
+        "sms": ("phone-symbolic", Identity.ME),
+        "imessage": ("phone-apple-symbolic", Identity.ME),
+        "github": ("system-software-install-symbolic", Identity.MINDSONG),
+        "discord": ("user-available-symbolic", Identity.MINDSONG),
+        "slack": ("user-available-symbolic", Identity.MINDSONG),
+        "telegram": ("mail-send-symbolic", Identity.MINDSONG),
+        "whatsapp": ("phone-symbolic", Identity.MINDSONG),
+        "instagram_dm": ("camera-photo-symbolic", Identity.MINDSONG),
+        "instagram_comment": ("camera-photo-symbolic", Identity.MINDSONG),
+        "youtube_comment": ("video-display-symbolic", Identity.MINDSONG),
+        "twitter_dm": ("user-available-symbolic", Identity.MINDSONG),
+        "twitter_mention": ("user-available-symbolic", Identity.MINDSONG),
+        "linkedin": ("avatar-default-symbolic", Identity.MINDSONG),
+        "reddit": ("user-available-symbolic", Identity.MINDSONG),
+        "twitch_chat": ("video-display-symbolic", Identity.MINDSONG),
+        "signal": ("channel-secure-symbolic", Identity.ME),
+        "matrix": ("network-server-symbolic", Identity.MINDSONG),
+        "rss": ("application-rss+xml-symbolic", Identity.MINDSONG),
+        # System sources
+        "ops_alert": ("dialog-warning-symbolic", Identity.MINDSONG),
+        "orchestrator": ("system-run-symbolic", Identity.MINDSONG),
+        "stackkraft": ("media-playback-start-symbolic", Identity.MINDSONG),
+        "service_health": ("emblem-ok-symbolic", Identity.MINDSONG),
+    }
+    
+    @classmethod
+    def get_mock_inbox(cls) -> List[InboxThread]:
+        """Generate mock inbox threads."""
+        now = datetime.now()
+        
+        threads = [
+            InboxThread(
+                id="1", source="email_personal", source_icon="mail-unread-symbolic",
+                identity=Identity.ME, sender="Mom", preview="Hey, are you coming to dinner Sunday?",
+                bucket=Bucket.NOW, priority=0, timestamp=now, suggested_action="Reply"
+            ),
+            InboxThread(
+                id="2", source="github", source_icon="system-software-install-symbolic",
+                identity=Identity.MINDSONG, sender="dependabot[bot]", preview="Bump axios from 1.6.0 to 1.6.2",
+                bucket=Bucket.QUEUED, priority=2, timestamp=now, suggested_action="Approve"
+            ),
+            InboxThread(
+                id="3", source="discord", source_icon="user-available-symbolic",
+                identity=Identity.MINDSONG, sender="@techfan42", preview="Love the new video! How did you set up...",
+                bucket=Bucket.QUEUED, priority=1, timestamp=now, suggested_action="Reply"
+            ),
+            InboxThread(
+                id="4", source="youtube_comment", source_icon="video-display-symbolic",
+                identity=Identity.MINDSONG, sender="MusicLover99", preview="This is exactly what I needed! 🔥",
+                bucket=Bucket.FYI, priority=2, timestamp=now, suggested_action="Like"
+            ),
+            InboxThread(
+                id="5", source="ops_alert", source_icon="dialog-warning-symbolic",
+                identity=Identity.MINDSONG, sender="Grafana", preview="GPU1 temp > 55°C for 5 minutes",
+                bucket=Bucket.NOW, priority=0, timestamp=now, suggested_action="Investigate"
+            ),
+            InboxThread(
+                id="6", source="instagram_dm", source_icon="camera-photo-symbolic",
+                identity=Identity.MINDSONG, sender="@producer_beats", preview="Collab? I make beats in your style",
+                bucket=Bucket.QUEUED, priority=1, timestamp=now, suggested_action="Reply"
+            ),
+            InboxThread(
+                id="7", source="twitter_mention", source_icon="user-available-symbolic",
+                identity=Identity.MINDSONG, sender="@AIEnthusiast", preview="@novaxe your local LLM setup is insane!",
+                bucket=Bucket.FYI, priority=2, timestamp=now, suggested_action="Like"
+            ),
+            InboxThread(
+                id="8", source="email_business", source_icon="mail-unread-symbolic",
+                identity=Identity.MINDSONG, sender="Gumroad", preview="New sale: AI Automation Starter Kit",
+                bucket=Bucket.FYI, priority=2, timestamp=now, suggested_action="Archive"
+            ),
+            InboxThread(
+                id="9", source="slack", source_icon="user-available-symbolic",
+                identity=Identity.MINDSONG, sender="#dev-general", preview="Anyone tried the new Ollama release?",
+                bucket=Bucket.FYI, priority=2, timestamp=now, suggested_action="Reply"
+            ),
+            InboxThread(
+                id="10", source="stackkraft", source_icon="media-playback-start-symbolic",
+                identity=Identity.MINDSONG, sender="Pipeline", preview="3 clips ready for TikTok publish",
+                bucket=Bucket.QUEUED, priority=1, timestamp=now, suggested_action="Approve"
+            ),
+        ]
+        return threads
+    
+    @classmethod
+    def get_mock_runs(cls) -> List[ExecutionRun]:
+        """Generate mock execution runs."""
+        return [
+            ExecutionRun(
+                id="run-1", name="Deploy Command Center v1.2",
+                type="deployment", status=RunStatus.QUEUED,
+                started_at=None, progress_pct=None
+            ),
+            ExecutionRun(
+                id="run-2", name="StackKraft: Publish to TikTok",
+                type="content_pipeline", status=RunStatus.RUNNING,
+                started_at=datetime.now(), progress_pct=45
+            ),
+            ExecutionRun(
+                id="run-3", name="Backup PostgreSQL",
+                type="orchestrator", status=RunStatus.COMPLETED,
+                started_at=datetime.now(), progress_pct=100, can_cancel=False
+            ),
+            ExecutionRun(
+                id="run-4", name="Sync MindSong to Mac Studio",
+                type="orchestrator", status=RunStatus.FAILED,
+                started_at=datetime.now(), progress_pct=67, can_cancel=False
+            ),
+        ]
+    
+    @classmethod
+    def get_mock_chat(cls) -> List[ChatMessage]:
+        """Generate mock chat history."""
+        now = datetime.now()
+        return [
+            ChatMessage(
+                id="msg-1", role="system",
+                content="Connected to ROXY (local) • qwen2.5:14b • MindSong context",
+                timestamp=now
+            ),
+            ChatMessage(
+                id="msg-2", role="user",
+                content="Check the GPU temps and deploy the fix if everything looks good",
+                timestamp=now
+            ),
+            ChatMessage(
+                id="msg-3", role="assistant",
+                content="GPU0 (W7900) is at 38°C, GPU1 (W7800) at 52°C - both within normal range. "
+                        "The deployment is ready. Should I proceed with the deploy?",
+                timestamp=now
+            ),
+        ]
 
 
 # =============================================================================
@@ -281,19 +394,8 @@ class InboxThreadRow(Gtk.ListBoxRow):
         actions_row.append(roxy_btn)
     
     def _on_action(self, button):
-        """Handle action click — log and show feedback."""
+        """Handle action click - TODO: wire to a future orchestration API."""
         print(f"[Inbox] Action '{self.thread.suggested_action}' on thread {self.thread.id}")
-        # For now: show a transient dialog since full orchestration API is not yet wired
-        dialog = Gtk.MessageDialog(
-            transient_for=self.get_root(),
-            modal=True,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK,
-            text=f"Action: {self.thread.suggested_action}",
-        )
-        dialog.set_secondary_text(f"Thread: {self.thread.sender}\nPreview: {self.thread.preview[:80]}\n\nFull orchestration API not yet wired — logged for owner review.")
-        dialog.connect("response", lambda d, r: d.destroy())
-        dialog.show()
 
 
 class TriageColumn(Gtk.Box):
@@ -309,7 +411,7 @@ class TriageColumn(Gtk.Box):
         self._threads: List[InboxThread] = []
         
         self._build_ui()
-        self._load_data()
+        self._load_mock_data()
     
     def _build_ui(self):
         # Header
@@ -382,25 +484,8 @@ class TriageColumn(Gtk.Box):
         self._current_bucket = bucket
         self._refresh_list()
     
-    def _load_data(self):
-        """Load inbox threads from canonical sources."""
-        raw_threads = OrchestratorTruthProvider.get_inbox_threads()
-        self._threads = [
-            InboxThread(
-                id=t["id"],
-                source=t["source"],
-                source_icon=t["source_icon"],
-                identity=Identity.MINDSONG if t["identity"] == "mindsong" else Identity.ME,
-                sender=t["sender"],
-                preview=t["preview"],
-                bucket=Bucket.NOW if t["bucket"] == "now" else Bucket.QUEUED if t["bucket"] == "queued" else Bucket.FYI,
-                priority=t["priority"],
-                timestamp=t["timestamp"],
-                unread=t.get("unread", True),
-                suggested_action=t.get("suggested_action", "Review"),
-            )
-            for t in raw_threads
-        ]
+    def _load_mock_data(self):
+        self._threads = MockDataStore.get_mock_inbox()
         self._refresh_list()
     
     def _refresh_list(self):
@@ -433,31 +518,16 @@ class ChatMessage_Widget(Gtk.Box):
         self.set_margin_top(8)
         self.set_margin_start(12)
         self.set_margin_end(12)
-
-        def _display_text(value: Any) -> str:
-            if isinstance(value, str):
-                return value
-            if isinstance(value, dict):
-                parts = []
-                for key in ("id", "type", "source", "title", "label", "path", "content", "text"):
-                    item = value.get(key)
-                    if item:
-                        parts.append(f"{key}={item}")
-                return " | ".join(parts) if parts else str(value)
-            return str(value)
         
         if message.role == "system":
             self.add_css_class("system-message")
-            if message.structured_data.get("card_type") == "error":
-                self._build_error_card(message)
-            else:
-                label = Gtk.Label(label=message.content)
-                label.add_css_class("dim-label")
-                label.add_css_class("caption")
-                label.set_wrap(True)
-                label.set_xalign(0.5)
-                label.set_selectable(True)  # Enable text selection
-                self.append(label)
+            label = Gtk.Label(label=message.content)
+            label.add_css_class("dim-label")
+            label.add_css_class("caption")
+            label.set_wrap(True)
+            label.set_xalign(0.5)
+            label.set_selectable(True)  # Enable text selection
+            self.append(label)
         else:
             is_user = message.role == "user"
             
@@ -469,84 +539,12 @@ class ChatMessage_Widget(Gtk.Box):
             bubble.set_margin_end(0 if is_user else 50)
             self.append(bubble)
             
-            # Header row: role + metadata chips
-            header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            header_row.set_margin_bottom(2)
-            bubble.append(header_row)
-            
+            # Role label
             role_label = Gtk.Label(label="You" if is_user else "Roxy")
             role_label.add_css_class("caption")
             role_label.add_css_class("dim-label")
             role_label.set_xalign(0)
-            header_row.append(role_label)
-            
-            if not is_user:
-                # Model chip
-                if message.model:
-                    short_model = message.model.replace("roxy-coder-frontier", "ROXY").split(":")[0][:12]
-                    model_chip = Gtk.Label(label=f"🧠 {short_model}")
-                    model_chip.add_css_class("caption")
-                    model_chip.add_css_class("dim-label")
-                    model_chip.set_xalign(0)
-                    header_row.append(model_chip)
-                
-                # Latency chip
-                if message.latency_ms:
-                    lat_chip = Gtk.Label(label=f"⏱️ {message.latency_ms}ms")
-                    lat_chip.add_css_class("caption")
-                    lat_chip.add_css_class("dim-label")
-                    lat_chip.set_xalign(0)
-                    header_row.append(lat_chip)
-                
-                # Memory refs chip
-                if message.memory_refs:
-                    refs_chip = Gtk.Label(label=f"🧩 {len(message.memory_refs)} refs")
-                    refs_chip.add_css_class("caption")
-                    refs_chip.add_css_class("dim-label")
-                    refs_chip.set_xalign(0)
-                    header_row.append(refs_chip)
-                
-                # Context hash chip
-                if message.context_hash:
-                    hash_chip = Gtk.Label(label=f"🔐 {message.context_hash[:8]}")
-                    hash_chip.add_css_class("caption")
-                    hash_chip.add_css_class("dim-label")
-                    hash_chip.set_xalign(0)
-                    hash_chip.set_tooltip_text(f"Context hash: {message.context_hash}")
-                    header_row.append(hash_chip)
-                
-                # Context kernel version chip
-                if message.context_kernel_version:
-                    kv_chip = Gtk.Label(label=f"📦 v{message.context_kernel_version}")
-                    kv_chip.add_css_class("caption")
-                    kv_chip.add_css_class("dim-label")
-                    kv_chip.set_xalign(0)
-                    kv_chip.set_tooltip_text(f"Context Kernel version: {message.context_kernel_version}")
-                    header_row.append(kv_chip)
-
-                # Context kernel hash chip
-                if message.context_kernel_hash:
-                    kh_chip = Gtk.Label(label=f"🧬 {message.context_kernel_hash[:8]}")
-                    kh_chip.add_css_class("caption")
-                    kh_chip.add_css_class("dim-label")
-                    kh_chip.set_xalign(0)
-                    kh_chip.set_tooltip_text(f"Context Kernel hash: {message.context_kernel_hash}")
-                    header_row.append(kh_chip)
-                
-                # Degraded / bypass warning chip
-                if message.harness_bypassed:
-                    warn_chip = Gtk.Label(label="⚠️ BYPASS")
-                    warn_chip.add_css_class("caption")
-                    warn_chip.add_css_class("error")
-                    warn_chip.set_xalign(0)
-                    header_row.append(warn_chip)
-                elif message.degraded_reasons:
-                    deg_chip = Gtk.Label(label=f"⚠️ {len(message.degraded_reasons)} degraded")
-                    deg_chip.add_css_class("caption")
-                    deg_chip.add_css_class("warning")
-                    deg_chip.set_xalign(0)
-                    deg_chip.set_tooltip_text("\n".join(message.degraded_reasons))
-                    header_row.append(deg_chip)
+            bubble.append(role_label)
             
             # Content - SELECTABLE for copy/paste
             content_label = Gtk.Label(label=message.content)
@@ -555,351 +553,6 @@ class ChatMessage_Widget(Gtk.Box):
             content_label.set_max_width_chars(60)
             content_label.set_selectable(True)  # Enable text selection
             bubble.append(content_label)
-            
-            # Proposed actions row (assistant only)
-            if not is_user and message.proposed_actions:
-                actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-                actions_box.set_margin_top(4)
-                actions_box.add_css_class("linked")
-                bubble.append(actions_box)
-                
-                for action in message.proposed_actions:
-                    btn = Gtk.Button(label=f"⚡ {action}")
-                    btn.add_css_class("suggested-action")
-                    btn.add_css_class("pill")
-                    btn.add_css_class("caption")
-                    btn.set_tooltip_text(f"Proposed action: {action}")
-                    actions_box.append(btn)
-            
-            # Context Inspector evidence row (assistant only) — Phase 2: Expandable details
-            if not is_user and (
-                message.context_hash
-                or message.context_kernel_hash
-                or message.orico_counts
-                or message.token_budget
-                or message.source_health
-                or message.context_kernel
-            ):
-                evidence_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-                evidence_frame.set_margin_top(6)
-                evidence_frame.set_margin_start(4)
-                evidence_frame.set_margin_end(4)
-                evidence_frame.set_margin_bottom(4)
-                bubble.append(evidence_frame)
-                
-                # --- Toggle header row ---
-                toggle_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-                toggle_row.add_css_class("linked")
-                evidence_frame.append(toggle_row)
-
-                # Expand/collapse button stays first so it cannot be pushed out
-                # of the narrow operator pane by long evidence summaries.
-                expand_btn = Gtk.Button(label="🔍")
-                expand_btn.add_css_class("flat")
-                expand_btn.add_css_class("caption")
-                expand_btn.set_size_request(40, -1)
-                expand_btn.set_tooltip_text("Expand Context Inspector details")
-                toggle_row.append(expand_btn)
-                
-                # Compact summary chips (always visible)
-                summary = []
-                if message.context_hash:
-                    summary.append(f"🔐 {message.context_hash[:6]}")
-                if message.context_kernel_hash:
-                    summary.append(f"🧬 {message.context_kernel_hash[:6]}")
-                if message.orico_counts:
-                    summary.append(f"📦 ORICO {message.orico_counts.get('safeProvisional', 0)}")
-                if message.token_budget and message.token_budget.get('estimatedPromptTokens'):
-                    summary.append(f"📝 {message.token_budget['estimatedPromptTokens']}tk")
-                if message.degraded_reasons:
-                    summary.append(f"⚠️ {len(message.degraded_reasons)} degraded")
-                elif message.harness_bypassed:
-                    summary.append("⚠️ BYPASS")
-                
-                summary_label = Gtk.Label(label="  ".join(summary) if summary else "📊 Evidence")
-                summary_label.add_css_class("caption")
-                summary_label.add_css_class("dim-label")
-                summary_label.set_xalign(0)
-                summary_label.set_hexpand(True)
-                summary_label.set_ellipsize(Pango.EllipsizeMode.END)
-                toggle_row.append(summary_label)
-                
-                # --- Expandable detail panel (Gtk.Revealer) ---
-                revealer = Gtk.Revealer()
-                revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-                revealer.set_transition_duration(200)
-                revealer.set_reveal_child(False)
-                expand_btn.set_label("🔍")
-                expand_btn.set_tooltip_text("Expand Context Inspector details")
-                evidence_frame.append(revealer)
-                
-                detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-                detail_box.set_margin_top(6)
-                detail_box.set_margin_start(8)
-                detail_box.set_margin_end(8)
-                detail_box.set_margin_bottom(6)
-                revealer.set_child(detail_box)
-                
-                def _build_detail_row(label_text: str, value_text: Any, icon: str = "", warning: bool = False):
-                    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-                    row.set_margin_start(4)
-                    lbl = Gtk.Label(label=f"{icon} {label_text}" if icon else label_text)
-                    lbl.add_css_class("caption")
-                    lbl.add_css_class("dim-label")
-                    lbl.set_xalign(0)
-                    lbl.set_size_request(120, -1)
-                    row.append(lbl)
-                    val = Gtk.Label(label=_display_text(value_text))
-                    val.add_css_class("caption")
-                    val.set_xalign(0)
-                    val.set_selectable(True)
-                    if warning:
-                        val.add_css_class("warning")
-                    row.append(val)
-                    return row
-                
-                # Section: Context Identity
-                detail_box.append(_build_detail_row("Hash", message.context_hash or "—", "🔐"))
-                detail_box.append(_build_detail_row("Kernel", message.context_kernel_version or "—", "📦"))
-                if message.context_kernel_hash:
-                    detail_box.append(_build_detail_row("Kernel Hash", message.context_kernel_hash, "🧬"))
-
-                if message.context_kernel:
-                    kernel_keys = ", ".join(sorted(message.context_kernel.keys())[:10]) or "—"
-                    detail_box.append(_build_detail_row("Packet Keys", kernel_keys, "🧾"))
-
-                # Section: Source Health
-                source_health = message.source_health or {}
-                if not source_health and message.context_kernel:
-                    source_health = message.context_kernel.get("sourceHealth", {}) or {}
-
-                if source_health:
-                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                    sep.set_margin_top(4)
-                    sep.set_margin_bottom(4)
-                    detail_box.append(sep)
-                    
-                    qdrant = source_health.get('qdrant', {})
-                    graph = source_health.get('graph', {})
-                    bridge = source_health.get('bridge', {})
-                    sqlite = source_health.get('sqlite', {})
-                    
-                    if qdrant.get('pointsCount') is not None:
-                        detail_box.append(_build_detail_row("Qdrant", f"{qdrant['pointsCount']} points", "🗄️"))
-                    if graph.get('nodesCount') is not None:
-                        detail_box.append(_build_detail_row("Graph", f"{graph['nodesCount']} nodes / {graph.get('edgesCount', '?')} edges", "🕸️"))
-                    if sqlite.get('status'):
-                        sqlite_bits = [str(sqlite.get('status'))]
-                        if sqlite.get('pendingCount') is not None:
-                            sqlite_bits.append(f"pending {sqlite.get('pendingCount')}")
-                        if sqlite.get('approvedCount') is not None:
-                            sqlite_bits.append(f"approved {sqlite.get('approvedCount')}")
-                        if sqlite.get('promotedCount') is not None:
-                            sqlite_bits.append(f"promoted {sqlite.get('promotedCount')}")
-                        detail_box.append(_build_detail_row("SQLite", " • ".join(sqlite_bits), "🧷"))
-                    if bridge.get('status'):
-                        detail_box.append(_build_detail_row("Bridge", bridge['status'], "🔗"))
-                    if bridge.get('latency_ms'):
-                        detail_box.append(_build_detail_row("Latency", f"{bridge['latency_ms']}ms", "⏱️"))
-                
-                # Section: ORICO
-                if message.orico_counts:
-                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                    sep.set_margin_top(4)
-                    sep.set_margin_bottom(4)
-                    detail_box.append(sep)
-                    
-                    safe = message.orico_counts.get('safeProvisional', 0)
-                    review = message.orico_counts.get('ownerReview', 0)
-                    privacy = message.orico_counts.get('privacyQuarantine', 0)
-                    detail_box.append(_build_detail_row("Safe", str(safe), "🟢"))
-                    detail_box.append(_build_detail_row("Review", str(review), "🟡"))
-                    detail_box.append(_build_detail_row("Privacy", str(privacy), "🔴"))
-                
-                # Section: Token Budget
-                if message.token_budget:
-                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                    sep.set_margin_top(4)
-                    sep.set_margin_bottom(4)
-                    detail_box.append(sep)
-                    
-                    max_tok = message.token_budget.get('maxPromptTokens', '?')
-                    est_tok = message.token_budget.get('estimatedPromptTokens', '?')
-                    turns = message.token_budget.get('recentTurnsInjected', '?')
-                    receipt_refs = message.token_budget.get('receiptRefs', [])
-                    retrieval_refs = message.token_budget.get('retrievalRefs', [])
-                    detail_box.append(_build_detail_row("Max", str(max_tok), "📊"))
-                    detail_box.append(_build_detail_row("Estimated", str(est_tok), "📝"))
-                    detail_box.append(_build_detail_row("Turns", str(turns), "🔄"))
-                    if retrieval_refs:
-                        detail_box.append(_build_detail_row("Retrieval", f"{len(retrieval_refs)} refs", "🔎"))
-                    if receipt_refs:
-                        detail_box.append(_build_detail_row("Receipts", f"{len(receipt_refs)} refs", "🧾"))
-                
-                # Section: Memory Refs
-                if message.memory_refs:
-                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                    sep.set_margin_top(4)
-                    sep.set_margin_bottom(4)
-                    detail_box.append(sep)
-                    
-                    refs_lbl = Gtk.Label(label=f"🧩 {len(message.memory_refs)} memory refs injected:")
-                    refs_lbl.add_css_class("caption")
-                    refs_lbl.add_css_class("dim-label")
-                    refs_lbl.set_xalign(0)
-                    detail_box.append(refs_lbl)
-                    
-                    for i, ref in enumerate(message.memory_refs[:8], 1):
-                        ref_label = _display_text(ref)
-                        ref_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-                        ref_row.set_margin_start(16)
-                        num = Gtk.Label(label=f"{i}.")
-                        num.add_css_class("caption")
-                        num.add_css_class("dim-label")
-                        num.set_size_request(20, -1)
-                        ref_row.append(num)
-                        ref_txt = Gtk.Label(label=ref_label[:80] + ("…" if len(ref_label) > 80 else ""))
-                        ref_txt.add_css_class("caption")
-                        ref_txt.set_xalign(0)
-                        ref_txt.set_selectable(True)
-                        ref_txt.set_wrap(True)
-                        ref_txt.set_max_width_chars(50)
-                        ref_row.append(ref_txt)
-                        detail_box.append(ref_row)
-                    
-                    if len(message.memory_refs) > 8:
-                        more = Gtk.Label(label=f"  … and {len(message.memory_refs) - 8} more")
-                        more.add_css_class("caption")
-                        more.add_css_class("dim-label")
-                        more.set_margin_start(16)
-                        detail_box.append(more)
-                
-                # Section: Degraded / Bypass
-                if message.degraded_reasons:
-                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                    sep.set_margin_top(4)
-                    sep.set_margin_bottom(4)
-                    detail_box.append(sep)
-                    
-                    for reason in message.degraded_reasons:
-                        detail_box.append(_build_detail_row("Warning", reason, "⚠️", warning=True))
-                
-                if message.harness_bypassed:
-                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                    sep.set_margin_top(4)
-                    sep.set_margin_bottom(4)
-                    detail_box.append(sep)
-                    detail_box.append(_build_detail_row("Status", "Harness bypassed — generic model response", "🚨", warning=True))
-                
-                # Toggle handler
-                def _on_evidence_toggle(btn, rev):
-                    active = not rev.get_reveal_child()
-                    rev.set_reveal_child(active)
-                    btn.set_label("🔼" if active else "🔍")
-                    btn.set_tooltip_text("Collapse details" if active else "Expand Context Inspector details")
-                
-                expand_btn.connect("clicked", _on_evidence_toggle, revealer)
-                row_click = Gtk.GestureClick()
-                row_click.connect(
-                    "released",
-                    lambda gesture, n_press, x, y: _on_evidence_toggle(expand_btn, revealer),
-                )
-                toggle_row.add_controller(row_click)
-
-    def _build_error_card(self, message: ChatMessage):
-        """Render a structured error card for operator-trustworthy chat errors."""
-        data = message.structured_data or {}
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        card.set_margin_top(8)
-        card.set_margin_bottom(8)
-        card.set_margin_start(24)
-        card.set_margin_end(24)
-        card.add_css_class("frame")
-        card.add_css_class("error-card")
-        self.append(card)
-
-        # Header row: icon + title + subtitle
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        card.append(header)
-
-        icon = Gtk.Label(label=data.get("icon", "❌"))
-        header.append(icon)
-
-        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        title_box.set_hexpand(True)
-        header.append(title_box)
-
-        title = Gtk.Label(label=data.get("title", "Error"))
-        title.add_css_class("heading")
-        title.set_xalign(0)
-        title_box.append(title)
-
-        if data.get("subtitle"):
-            subtitle = Gtk.Label(label=data["subtitle"])
-            subtitle.add_css_class("caption")
-            subtitle.add_css_class("dim-label")
-            subtitle.set_xalign(0)
-            subtitle.set_wrap(True)
-            title_box.append(subtitle)
-
-        # Detail rows
-        for key, value in data.get("details", {}).items():
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            row.set_margin_start(8)
-            key_lbl = Gtk.Label(label=f"{key}:")
-            key_lbl.add_css_class("caption")
-            key_lbl.add_css_class("dim-label")
-            key_lbl.set_xalign(0)
-            row.append(key_lbl)
-            val_lbl = Gtk.Label(label=str(value))
-            val_lbl.add_css_class("caption")
-            val_lbl.set_xalign(0)
-            val_lbl.set_wrap(True)
-            val_lbl.set_selectable(True)
-            row.append(val_lbl)
-            card.append(row)
-
-        # Diagnostics block
-        diagnostics = data.get("diagnostics") or []
-        if diagnostics:
-            diag_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            diag_frame.set_margin_start(8)
-            diag_frame.set_margin_top(4)
-            diag_frame.add_css_class("linked")
-            card.append(diag_frame)
-            diag_title = Gtk.Label(label="Factory diagnostics")
-            diag_title.add_css_class("caption")
-            diag_title.add_css_class("dim-label")
-            diag_title.set_xalign(0)
-            diag_frame.append(diag_title)
-            for line in diagnostics[:6]:
-                line_lbl = Gtk.Label(label=str(line))
-                line_lbl.add_css_class("caption")
-                line_lbl.set_xalign(0)
-                line_lbl.set_wrap(True)
-                line_lbl.set_selectable(True)
-                diag_frame.append(line_lbl)
-            if len(diagnostics) > 6:
-                more = Gtk.Label(label=f"… and {len(diagnostics) - 6} more lines")
-                more.add_css_class("caption")
-                more.add_css_class("dim-label")
-                more.set_xalign(0)
-                diag_frame.append(more)
-
-        # Action buttons
-        actions = data.get("actions") or []
-        if actions:
-            actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            actions_box.set_margin_top(6)
-            actions_box.set_margin_start(8)
-            actions_box.set_halign(Gtk.Align.START)
-            card.append(actions_box)
-            for action in actions:
-                btn = Gtk.Button(label=action)
-                btn.add_css_class("suggested-action")
-                btn.add_css_class("pill")
-                btn.add_css_class("caption")
-                actions_box.append(btn)
 
 
 class TalkColumn(Gtk.Box):
@@ -919,8 +572,6 @@ class TalkColumn(Gtk.Box):
         # Operator controls (Chief's Truth Panel)
         self._routing_mode = "AUTO"  # CHAT, RAG, EXEC, AUTO
         self._pool_mode = "AUTO"  # AUTO, ROXY
-        self._last_factory_truth: Dict[str, Any] = {}
-        self._last_factory_routes: Dict[str, Any] = {}
         
         # Services
         print("[TalkColumn] Getting services...")
@@ -954,9 +605,6 @@ class TalkColumn(Gtk.Box):
         self._connect_to_roxy()
         print("[TalkColumn] Starting info polling...")
         self._start_info_polling()
-        print("[TalkColumn] Starting lane health polling...")
-        self._start_lane_health_polling()
-        
         print("[TalkColumn] ========== INIT COMPLETE ==========" )
     
     def _save_settings(self):
@@ -987,13 +635,6 @@ class TalkColumn(Gtk.Box):
                 idx_pool = self._pool_dropdown.get_selected()
                 if idx_pool < len(pools):
                     data["pool_mode"] = pools[idx_pool]
-            
-            # Lane selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
-            lanes = ["auto", "frontier", "judge", "local", "cloud"]
-            if hasattr(self, '_lane_dropdown'):
-                idx_lane = self._lane_dropdown.get_selected()
-                if idx_lane < len(lanes):
-                    data["lane"] = lanes[idx_lane]
                 
             settings_file.write_text(json.dumps(data, indent=2))
         except Exception as e:
@@ -1023,18 +664,6 @@ class TalkColumn(Gtk.Box):
                 self._pool_dropdown.set_selected(pools.index(pool))
                 self._pool_mode = pool
                 print(f"[Talk] Loaded sticky pool: {pool}")
-            
-            # Lane selection (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
-            lane = data.get("lane", "auto")
-            lanes = ["auto", "frontier", "judge", "local", "cloud"]
-            lane_names = ["Auto", "Frontier Coder", "Judge", "Local Utility", "Cloud/API"]
-            if lane in lanes and hasattr(self, '_lane_dropdown'):
-                self._lane_dropdown.set_selected(lanes.index(lane))
-                self._chat_service.set_lane(lane)
-                name = lane_names[lanes.index(lane)]
-                if self._current_lane_label:
-                    self._current_lane_label.set_label(f"Using: {name}")
-                print(f"[Talk] Loaded sticky lane: {lane}")
                 
         except Exception as e:
             print(f"[Talk] Failed to load settings: {e}")
@@ -1169,7 +798,6 @@ class TalkColumn(Gtk.Box):
         
         self.chat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         scrolled.set_child(self.chat_box)
-        self._chat_scrolled = scrolled  # Reference for auto-scroll
         
         # Typing indicator (hidden by default)
         self._typing_indicator = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1192,25 +820,6 @@ class TalkColumn(Gtk.Box):
         input_area.set_margin_end(12)
         input_area.set_margin_bottom(12)
         self.append(input_area)
-
-        # Factory truth strip: one compact source of route/status truth above input.
-        factory_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        factory_row.set_margin_bottom(6)
-        input_area.append(factory_row)
-
-        self._factory_badge = TruthBadge("Factory", "UNPROVEN")
-        factory_row.append(self._factory_badge)
-
-        self._route_truth_badges = TruthBadgeGroup(spacing=6)
-        for key, label_text in [
-            ("chat_proxy", "Proxy"),
-            ("litellm", "LiteLLM"),
-            ("frontier", "Ada"),
-            ("decode_6900xt", "6900XT"),
-            ("judge_235b", "Judge"),
-        ]:
-            self._route_truth_badges.set_badge(key, label_text, "LOADING")
-        factory_row.append(self._route_truth_badges)
         
         # Mode toggle row
         mode_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1266,7 +875,7 @@ class TalkColumn(Gtk.Box):
 
         self._pool_dropdown = Gtk.DropDown.new_from_strings(["AUTO", "ROXY"])
         self._pool_dropdown.set_selected(0)  # AUTO by default
-        self._pool_dropdown.set_tooltip_text("AUTO=ROXY harness :4001 → LiteLLM :4000 → Qwen MTP :8085")
+        self._pool_dropdown.set_tooltip_text("AUTO=local ROXY Ollama on port 11434")
         self._pool_dropdown.connect("notify::selected", self._on_pool_changed)
         operator_box.append(self._pool_dropdown)
         
@@ -1282,73 +891,6 @@ class TalkColumn(Gtk.Box):
         self._last_meta_chip.set_tooltip_text("Last request execution details")
         operator_box.append(self._last_meta_chip)
         
-        # === LANE SELECTOR (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1) ===
-        lane_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        lane_box.set_margin_top(4)
-        lane_box.set_margin_bottom(4)
-        input_area.append(lane_box)
-        
-        lane_label = Gtk.Label(label="Lane:")
-        lane_label.add_css_class("dim-label")
-        lane_box.append(lane_label)
-        
-        self._lane_dropdown = Gtk.DropDown.new_from_strings([
-            "Auto", "Frontier Coder", "Judge", "Local Utility", "Cloud/API"
-        ])
-        self._lane_dropdown.set_selected(0)  # Auto
-        cloud_tip = "Cloud=Claude fallback (requires ANTHROPIC_API_KEY)" if os.environ.get("ANTHROPIC_API_KEY") else "Cloud=Claude fallback 🔒 ANTHROPIC_API_KEY not set"
-        self._lane_dropdown.set_tooltip_text(
-            f"Auto=smart routing | Frontier=Qwen3.6-27B Ada :8085 | "
-            f"Judge=Qwen3-235B CPU :8084 | Local=Ollama 7B :11434 | {cloud_tip}"
-        )
-        self._lane_dropdown.connect("notify::selected", self._on_lane_changed)
-        lane_box.append(self._lane_dropdown)
-        
-        # Active route truth label (updated from last response)
-        self._current_lane_label = Gtk.Label(label="Using: Auto")
-        self._current_lane_label.add_css_class("dim-label")
-        self._current_lane_label.add_css_class("caption")
-        self._current_lane_label.set_margin_start(8)
-        lane_box.append(self._current_lane_label)
-        
-        # Spacer
-        lane_spacer = Gtk.Box()
-        lane_spacer.set_hexpand(True)
-        lane_box.append(lane_spacer)
-        
-        # Phase 4: Save-authority toolbar
-        save_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        save_toolbar.set_margin_top(4)
-        input_area.append(save_toolbar)
-        
-        save_btn = Gtk.Button(label="💾 Save")
-        save_btn.add_css_class("flat")
-        save_btn.add_css_class("caption")
-        save_btn.set_tooltip_text("Save conversation to session file")
-        save_btn.connect("clicked", self._on_save_session)
-        save_toolbar.append(save_btn)
-        
-        export_btn = Gtk.Button(label="📤 Export")
-        export_btn.add_css_class("flat")
-        export_btn.add_css_class("caption")
-        export_btn.set_tooltip_text("Export conversation to markdown file")
-        export_btn.connect("clicked", self._on_export_session)
-        save_toolbar.append(export_btn)
-        
-        clear_btn = Gtk.Button(label="🗑️ Clear")
-        clear_btn.add_css_class("flat")
-        clear_btn.add_css_class("caption")
-        clear_btn.add_css_class("destructive-action")
-        clear_btn.set_tooltip_text("Clear conversation history (requires confirmation)")
-        clear_btn.connect("clicked", self._on_clear_session)
-        save_toolbar.append(clear_btn)
-        
-        self._save_status_label = Gtk.Label(label="")
-        self._save_status_label.add_css_class("caption")
-        self._save_status_label.add_css_class("dim-label")
-        self._save_status_label.set_margin_start(8)
-        save_toolbar.append(self._save_status_label)
-        
         # Input row
         input_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         input_area.append(input_row)
@@ -1361,48 +903,18 @@ class TalkColumn(Gtk.Box):
         voice_btn.connect("clicked", self._on_voice_click)
         input_row.append(voice_btn)
         
-        # Keep Send visible even when the right operator pane is narrow.
-        self._send_action_btn = Gtk.Button(label="Send")
-        self._send_action_btn.add_css_class("suggested-action")
-        self._send_action_btn.set_size_request(64, -1)
-        self._send_action_btn.connect("clicked", self._on_send)
-        input_row.append(self._send_action_btn)
-
         # Text entry
         self.entry = Gtk.Entry()
         self.entry.set_hexpand(True)
         self.entry.set_placeholder_text("Talk to Roxy...")
         self.entry.connect("activate", self._on_send)
-
-        # Phase 7: Keyboard shortcuts — Ctrl+Enter to send, Escape to clear
-        key_controller = Gtk.EventControllerKey()
-        key_controller.connect("key-pressed", self._on_entry_key_pressed)
-        self.entry.add_controller(key_controller)
-
         input_row.append(self.entry)
-
-        # Phase 5: Send preflight warning label
-        self._send_preflight_label = Gtk.Label(label="")
-        self._send_preflight_label.add_css_class("caption")
-        self._send_preflight_label.add_css_class("error")
-        self._send_preflight_label.set_xalign(0)
-        self._send_preflight_label.set_margin_start(8)
-        self._send_preflight_label.set_margin_top(4)
-        self._send_preflight_label.set_wrap(True)
-        self._send_preflight_label.set_visible(False)
-        input_area.append(self._send_preflight_label)
-
-        # Make the chat surface immediately usable without hunting for the entry.
-        GLib.idle_add(self._focus_chat_entry)
-
-    def _focus_chat_entry(self):
-        """Move keyboard focus into the Roxy input field."""
-        try:
-            if hasattr(self, "entry") and self.entry:
-                self.entry.grab_focus()
-        except Exception as exc:
-            print(f"[Talk] Could not focus chat entry: {exc}")
-        return False
+        
+        # Send button
+        send_btn = Gtk.Button(label="Send")
+        send_btn.add_css_class("suggested-action")
+        send_btn.connect("clicked", self._on_send)
+        input_row.append(send_btn)
     
     def _connect_to_roxy(self):
         """Connect to local Ollama via ChatService."""
@@ -1448,29 +960,9 @@ class TalkColumn(Gtk.Box):
         """Take one local status snapshot; no background polling in review build."""
         self._info_fetch_pending = False  # Guard against concurrent fetches
         GLib.idle_add(self._poll_info)
-
-    def _start_lane_health_polling(self):
-        """Take one lane-health snapshot; no background polling in review build."""
-        GLib.idle_add(self._poll_lane_health)
-
-    def _poll_lane_health(self) -> bool:
-        """Fetch canonical lane health and update the lane selector tooltip."""
-        try:
-            health = self._chat_service.get_lane_health()
-            if health and self._current_lane_label:
-                parts = []
-                for key, info in health.items():
-                    status = info.get("status", "?")
-                    truth = info.get("truthGrade", "?")
-                    parts.append(f"{key}: {status}/{truth}")
-                tooltip = "Lane health:\n" + "\n".join(parts)
-                self._lane_dropdown.set_tooltip_text(tooltip)
-        except Exception as exc:
-            print(f"[Talk] Lane health snapshot failed: {exc}")
-        return False
     
     def _poll_info(self) -> bool:
-        """Fetch ROXY harness health and update Truth Panel chips."""
+        """Fetch local Ollama status and update Truth Panel chips."""
         # Skip if previous fetch still in progress (prevents thread accumulation)
         if getattr(self, '_info_fetch_pending', False):
             return True
@@ -1482,14 +974,17 @@ class TalkColumn(Gtk.Box):
             try:
                 import urllib.request
                 import json
-                # Canonical: check ROXY harness :4001/health
-                req = urllib.request.Request("http://127.0.0.1:4001/health")
+                req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
                 req.add_header("User-Agent", "roxy-command-center/truth-panel")
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     payload = json.loads(resp.read().decode())
                     data = {
                         "server_time_iso": datetime.now().isoformat(),
-                        "harness": payload,
+                        "ollama": {
+                            "reachable": True,
+                            "base_url": "http://127.0.0.1:11434",
+                            "models": payload.get("models", []),
+                        },
                     }
                     GLib.idle_add(self._update_truth_panel, data)
             except Exception as e:
@@ -1501,11 +996,12 @@ class TalkColumn(Gtk.Box):
         return False  # Manual snapshot only
     
     def _update_truth_panel(self, data: dict):
-        """Update Truth Panel chips with harness /health data."""
+        """Update Truth Panel chips with /info data."""
         if self._time_chip:
             try:
                 ts = data.get("server_time_iso", "")
                 if ts:
+                    # Parse ISO format for full date/time context
                     dt = datetime.fromisoformat(ts)
                     self._time_chip.set_label(f"🕐 {dt.strftime('%Y-%m-%d %H:%M')}")
             except:
@@ -1515,35 +1011,24 @@ class TalkColumn(Gtk.Box):
             git = data.get("git", {})
             branch = git.get("branch", "?")
             sha = git.get("head_sha", "?")[:7]
+            # State: clean (✔) or dirty (⚠️)
             state = "⚠️" if git.get("dirty") else "✔"
             self._git_chip.set_label(f"🔀 {branch} • {sha} • {state}")
             self._git_chip.set_tooltip_text(git.get("last_commit_subject", ""))
         
-        # Harness chip (was Ollama chip — now shows ROXY harness status)
         if self._ollama_chip:
-            harness = data.get("harness", {})
-            ok = bool(harness.get("ok"))
-            upstream_ok = bool(harness.get("upstreamReachable"))
-            prompt_loaded = bool(harness.get("promptLoaded"))
-            skill_count = harness.get("skillEmbeddingsLoaded", 0)
-            storage = harness.get("storage", {})
-            storage_status = storage.get("status", "unknown")
-            svc = harness.get("service", "roxy-chat-proxy")
+            ollama = data.get("ollama", {})
+            reachable = bool(ollama.get("reachable"))
+            model_count = len(ollama.get("models", []))
+            url = ollama.get("base_url") or ollama.get("url") or "http://127.0.0.1:11434"
 
-            status_icon = "✅" if ok and upstream_ok else "⚠️" if ok else "❌"
-            self._ollama_chip.set_label(
-                f"🧠 {status_icon} {svc} ({storage_status})"
-            )
+            self._ollama_chip.set_label(f"🦙 {'ok' if reachable else 'err'} ({model_count})")
             self._ollama_chip.set_tooltip_text(
-                f"ROXY Harness: {svc}\n"
-                f"Upstream: {'OK' if upstream_ok else 'DOWN'}\n"
-                f"Prompt: {'loaded' if prompt_loaded else 'missing'}\n"
-                f"Skills: {skill_count}\n"
-                f"Store: {storage_status}\n"
-                f"DB: {storage.get('dbPath', 'N/A')}"
+                f"Ollama: {url}\nmodels: {model_count}" +
+                (f"\nerror: {ollama.get('error')}" if ollama.get("error") else "")
             )
 
-            if ok and upstream_ok:
+            if reachable:
                 self._ollama_chip.remove_css_class("error")
             else:
                 self._ollama_chip.add_css_class("error")
@@ -1608,98 +1093,17 @@ class TalkColumn(Gtk.Box):
             self._typing_indicator.set_visible(False)
         self._connect_to_roxy()
     
-    def _scroll_to_bottom(self):
-        """Auto-scroll chat to bottom when new messages arrive."""
-        if hasattr(self, '_chat_scrolled'):
-            adj = self._chat_scrolled.get_vadjustment()
-            if adj:
-                # Use idle_add to scroll after widget allocation
-                def _do_scroll():
-                    adj.set_value(adj.get_upper() - adj.get_page_size())
-                    return False
-                GLib.idle_add(_do_scroll)
-    
     def _on_chat_message(self, message: ServiceChatMessage):
         """Called when a new message arrives (user or assistant)."""
-        # Convert to UI widget with harness metadata
+        # Convert to UI widget
         ui_message = ChatMessage(
             id=message.id,
             role=message.role,
             content=message.content,
-            timestamp=message.timestamp,
-            latency_ms=getattr(message, 'latency_ms', 0),
-            model=getattr(message, 'model', ''),
-            memory_refs=getattr(message, 'memory_refs', []),
-            proposed_actions=getattr(message, 'proposed_actions', []),
-            context_hash=getattr(message, 'context_hash', ''),
-            context_kernel_version=getattr(message, 'context_kernel_version', ''),
-            context_kernel_hash=getattr(message, 'context_kernel_hash', ''),
-            context_kernel=getattr(message, 'context_kernel', {}),
-            source_health=getattr(message, 'source_health', {}),
-            token_budget=getattr(message, 'token_budget', {}),
-            orico_counts=getattr(message, 'orico_counts', {}),
-            degraded_reasons=getattr(message, 'degraded_reasons', []),
-            harness_bypassed=getattr(message, 'harness_bypassed', False),
-            structured_data=getattr(message, 'structured_data', {}),
+            timestamp=message.timestamp
         )
         widget = ChatMessage_Widget(ui_message)
         self.chat_box.append(widget)
-        
-        # Add "Ask Judge" button for assistant messages (ROXY-COMMAND-CENTER-MODEL-LANE-SWITCHER-V1)
-        if message.role == "assistant":
-            health = self._chat_service.get_lane_health()
-            judge_info = health.get("judge", {})
-            # Judge is usable if status is healthy (even if slow)
-            judge_alive = judge_info.get("status") == "healthy" or judge_info.get("truthGrade") == "live_probe"
-            judge_tps = judge_info.get("tps")
-            judge_slow = judge_tps is not None and judge_tps < 10  # Under 10 t/s = slow
-
-            # If this response came from Judge, label it
-            model_used = getattr(message, 'model', '') or ''
-            is_judge_response = 'judge' in model_used.lower() or 'cpu-supermodel' in model_used.lower()
-
-            judge_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            judge_box.set_margin_start(12)
-            judge_box.set_margin_end(12)
-            judge_box.set_margin_bottom(8)
-            self.chat_box.append(judge_box)
-
-            if is_judge_response:
-                judge_header = Gtk.Label(label="⚖️ Judge Review")
-                judge_header.add_css_class("caption")
-                judge_header.add_css_class("accent")
-                judge_box.append(judge_header)
-
-            judge_btn = Gtk.Button(label="⚖️ Ask Judge")
-            judge_btn.add_css_class("pill")
-            judge_btn.add_css_class("caption")
-            if judge_alive:
-                judge_btn.add_css_class("suggested-action")
-                tooltip = "Send this response to Judge for adversarial review"
-                if judge_slow:
-                    tooltip += " (expect 1–3 min)"
-                judge_btn.set_tooltip_text(tooltip)
-                judge_btn.connect("clicked", self._on_ask_judge, message.content)
-            else:
-                judge_btn.set_sensitive(False)
-                judge_btn.set_tooltip_text("Judge lane is not available")
-            judge_box.append(judge_btn)
-
-            send_to_judge_btn = Gtk.Button(label="📤 Send plan to Judge")
-            send_to_judge_btn.add_css_class("pill")
-            send_to_judge_btn.add_css_class("caption")
-            if judge_alive:
-                tooltip = "Send current plan/response to Judge for deep review"
-                if judge_slow:
-                    tooltip += " (expect 1–3 min)"
-                send_to_judge_btn.set_tooltip_text(tooltip)
-                send_to_judge_btn.connect("clicked", self._on_ask_judge, message.content)
-            else:
-                send_to_judge_btn.set_sensitive(False)
-                send_to_judge_btn.set_tooltip_text("Judge lane is not available")
-            judge_box.append(send_to_judge_btn)
-        
-        self._scroll_to_bottom()
         
         # Update latency chip for assistant messages
         if message.role == "assistant":
@@ -1719,7 +1123,6 @@ class TalkColumn(Gtk.Box):
         )
         widget = ChatMessage_Widget(message)
         self.chat_box.append(widget)
-        self._scroll_to_bottom()
     
     def _on_status_change(self, status: ConnectionStatus, message: str):
         """Called when connection status changes."""
@@ -1796,153 +1199,6 @@ class TalkColumn(Gtk.Box):
         print(f"[Talk] Pool: {self._pool_mode}")
         self._save_settings()
     
-    def _on_lane_changed(self, dropdown, _pspec):
-        """Handle lane selection change."""
-        lanes = ["auto", "frontier", "judge", "local", "cloud"]
-        names = ["Auto", "Frontier Coder", "Judge", "Local Utility", "Cloud/API"]
-        idx = dropdown.get_selected()
-        lane = lanes[idx] if idx < len(lanes) else "auto"
-        name = names[idx] if idx < len(names) else "Auto"
-        self._chat_service.set_lane(lane)
-        if self._current_lane_label:
-            self._current_lane_label.set_label(f"Using: {name}")
-        print(f"[Talk] Lane: {lane} → {self._chat_service.selected_lane}")
-        self._update_send_preflight()
-        self._save_settings()
-
-        # Credential-blocked warning for Cloud
-        if lane == "cloud" and not os.environ.get("ANTHROPIC_API_KEY"):
-            self._append_system_message(
-                "🔒 Cloud lane selected but ANTHROPIC_API_KEY is not set. "
-                "Set it in your environment or choose a different lane."
-            )
-
-        # SLOW warning for Judge
-        if lane == "judge":
-            self._append_system_message(
-                "⚠️ Judge selected: Qwen3-235B on CPU (~3.5 t/s). Responses may take 1–3 minutes."
-            )
-    
-    def update(self, data: dict):
-        """Update the Chat cockpit from daemon + factory truth snapshots."""
-        factory_truth = data.get("factoryTruth") or {}
-        if factory_truth:
-            self._last_factory_truth = factory_truth
-            self._update_factory_truth_display(factory_truth)
-        factory_routes = data.get("factoryRoutes") or {}
-        if factory_routes:
-            self._last_factory_routes = factory_routes
-
-    def _update_factory_truth_display(self, truth: Dict[str, Any]):
-        """Render Factory status and route truth using TruthBadge components."""
-        verdict = truth.get("verdict", "UNKNOWN")
-        ready = truth.get("ready") or {}
-        services = truth.get("servicesById") or {}
-        receipt = truth.get("receiptPath") or ""
-        generated_at = truth.get("generatedAt")
-        stale = truth.get("stale", False)
-        stale_reason = truth.get("staleReason")
-        command_id = truth.get("commandId", "factory.status")
-        warnings = truth.get("warnings") or []
-        errors = truth.get("errors") or []
-
-        provenance = {
-            "source": "rcc",
-            "command": command_id,
-            "timestamp": generated_at,
-            "receiptPath": receipt,
-            "stale": stale,
-        }
-
-        detail_parts = []
-        if stale:
-            detail_parts.append(f"STALE: {stale_reason or 'refresh failed'}")
-        if warnings:
-            detail_parts.append("; ".join(warnings[:2]))
-        if errors:
-            detail_parts.append("; ".join(errors[:2]))
-
-        if hasattr(self, "_factory_badge") and self._factory_badge:
-            self._factory_badge.set_truth(
-                verdict,
-                provenance,
-                detail="; ".join(detail_parts) if detail_parts else ""
-            )
-
-        badge_group = getattr(self, "_route_truth_badges", None)
-        if badge_group:
-            route_map = {
-                "chat_proxy": ("Proxy", "chatProxy"),
-                "litellm": ("LiteLLM", "litellm"),
-                "frontier": ("Ada", "qwenMtp"),
-                "decode_6900xt": ("6900XT", "decode6900xt"),
-                "judge_235b": ("Judge", "judge"),
-            }
-            for key, (label, ready_key) in route_map.items():
-                svc = services.get(key, {}) if isinstance(services, dict) else {}
-                is_ready = bool(svc.get("ready")) or bool(ready.get(ready_key))
-                port = svc.get("port", "")
-                status = svc.get("status", "unknown")
-                detail = f"port {port}, status {status}" if port else f"status {status}"
-                if stale:
-                    detail += " (stale)"
-                badge_group.set_badge(
-                    key,
-                    label,
-                    "PASS" if is_ready else "FAIL",
-                    provenance,
-                    detail=detail,
-                )
-
-        self._update_send_preflight()
-
-    def _update_send_preflight(self):
-        """Enable/disable Send based on selected lane + factory truth."""
-        lanes = ["auto", "frontier", "judge", "local", "cloud"]
-        idx = self._lane_dropdown.get_selected()
-        lane = lanes[idx] if idx < len(lanes) else "auto"
-
-        truth = getattr(self, "_last_factory_truth", {}) or {}
-        services = truth.get("servicesById") or {} if isinstance(truth, dict) else {}
-
-        blocked_reason = None
-        if lane == "local":
-            blocked_reason = "Local/Ollama lane is disabled by design"
-        elif lane == "frontier":
-            if not bool(services.get("frontier", {}).get("ready")):
-                blocked_reason = "Frontier (Ada) route is not ready"
-        elif lane == "judge":
-            if not bool(services.get("judge_235b", {}).get("ready")):
-                blocked_reason = "Judge route is not ready"
-        elif lane == "cloud":
-            if not bool(services.get("litellm", {}).get("ready")):
-                blocked_reason = "LiteLLM/Cloud route is not ready"
-            elif not os.environ.get("ANTHROPIC_API_KEY"):
-                blocked_reason = "Cloud lane requires ANTHROPIC_API_KEY"
-        elif lane == "auto":
-            auto_ready = bool(services.get("frontier", {}).get("ready")) or \
-                         bool(services.get("judge_235b", {}).get("ready"))
-            if not auto_ready:
-                blocked_reason = "No auto route is ready (Frontier/Judge both down)"
-
-        if blocked_reason:
-            self._send_action_btn.set_sensitive(False)
-            self._send_preflight_label.set_label(f"🚫 Send disabled: {blocked_reason}")
-            self._send_preflight_label.set_visible(True)
-            self.entry.set_placeholder_text("Select a ready lane to send…")
-        else:
-            self._send_action_btn.set_sensitive(True)
-            self._send_preflight_label.set_visible(False)
-            self.entry.set_placeholder_text("Talk to Roxy...")
-
-    def _on_ask_judge(self, button, text: str):
-        """Send current message/plan to Judge lane for adversarial review."""
-        print(f"[Talk] Asking Judge to review: {text[:60]}...")
-        self._chat_service.ask_judge(
-            f"Please perform an adversarial review of the following:\n\n{text}\n\n"
-            "Identify any errors, assumptions, gaps, or quality issues."
-        )
-    
     def _on_speak_toggle(self, button):
         """Toggle speak mode (Option B)."""
         self._speak_mode = button.get_active()
@@ -1956,114 +1212,6 @@ class TalkColumn(Gtk.Box):
         """Voice button - push-to-talk (Phase 2 stub)."""
         print("[Talk] Voice input not yet implemented (Phase 2)")
         # In Phase 2: self._voice_service.start_recording()
-    
-    def _on_save_session(self, button):
-        """Manually trigger session save."""
-        if self._chat_service.save_session():
-            self._save_status_label.set_label("💾 Saved")
-        else:
-            self._save_status_label.set_label("❌ Save failed")
-        GLib.timeout_add_seconds(3, lambda: self._save_status_label.set_label("") or False)
-    
-    def _on_export_session(self, button):
-        """Export conversation to markdown."""
-        path = self._chat_service.export_to_markdown()
-        if path:
-            self._save_status_label.set_label(f"📤 {path.name}")
-        else:
-            self._save_status_label.set_label("❌ Export failed")
-        GLib.timeout_add_seconds(5, lambda: self._save_status_label.set_label("") or False)
-    
-    def _on_clear_session(self, button):
-        """Clear conversation with confirmation dialog."""
-        dialog = Gtk.MessageDialog(
-            transient_for=self.get_root(),
-            modal=True,
-            message_type=Gtk.MessageType.QUESTION,
-            buttons=Gtk.ButtonsType.YES_NO,
-            text="Clear conversation history?",
-        )
-        dialog.set_secondary_text("This will erase all messages and reset the session. This action cannot be undone.")
-        
-        def on_response(dialog, response):
-            if response == Gtk.ResponseType.YES:
-                if self._chat_service.clear_session():
-                    # Clear UI
-                    child = self.chat_box.get_first_child()
-                    while child:
-                        next_child = child.get_next_sibling()
-                        self.chat_box.remove(child)
-                        child = next_child
-                    self._append_system_message("🗑️ Conversation cleared. Session reset.")
-                    self._save_status_label.set_label("🗑️ Cleared")
-                else:
-                    self._save_status_label.set_label("❌ Clear failed")
-                GLib.timeout_add_seconds(3, lambda: self._save_status_label.set_label("") or False)
-            dialog.destroy()
-        
-        dialog.connect("response", on_response)
-        dialog.show()
-    
-    def _detect_natural_language_intent(self, text: str) -> str:
-        """Detect routing intent from natural language. Returns CHAT/RAG/EXEC/""."""
-        t = text.lower().strip()
-        
-        # EXEC patterns: run commands, execute scripts, start/stop services
-        exec_patterns = [
-            r"\b(run|execute|exec|start|stop|restart|kill)\b.*\b(script|service|command|backup|deploy|build|test)",
-            r"\b(back me up|do a backup|deploy|run the|execute the)\b",
-            r"\b(show|list|get)\b.*\b(status|logs|processes|services)\b",
-        ]
-        import re
-        for p in exec_patterns:
-            if re.search(p, t, re.IGNORECASE):
-                return "EXEC"
-        
-        # RAG patterns: memory retrieval, knowledge queries
-        rag_patterns = [
-            r"\b(what do you remember|what do you know|what do we know)\b",
-            r"\b(what happened|tell me about|explain|summarize|search for|find|look up)\b.*\b(in the last|about|regarding|on|corpus|ORICO|document|file|dataset)\b",
-            r"\b(look up|retrieve|query|search)\b",
-            r"\b(ORICO|corpus|training|dataset|document|file)\b",
-            r"\b(what|where|how|when|why|who|status|count|info)\b.*\b(ORICO|corpus|training|dataset|document|file)\b",
-            r"\b(supervillain check|system status|health check|audit)\b",
-        ]
-        for p in rag_patterns:
-            if re.search(p, t, re.IGNORECASE):
-                return "RAG"
-        
-        # CHAT patterns: direct conversation, no retrieval needed
-        chat_patterns = [
-            r"^(hi|hello|hey|howdy|greetings)\b",
-            r"\b(how are you|what's up|how's it going|good morning|good evening)\b",
-            r"\b(thank you|thanks|please|sorry)\b",
-            r"^(yes|no|maybe|ok|sure|got it|understood)$",
-        ]
-        for p in chat_patterns:
-            if re.search(p, t, re.IGNORECASE):
-                return "CHAT"
-        
-        return ""
-    
-    def _on_entry_key_pressed(self, controller, keyval, keycode, state):
-        """Handle keyboard shortcuts in the entry field."""
-        from gi.repository import Gdk
-        ctrl = (state & Gdk.ModifierType.CONTROL_MASK) != 0
-        
-        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            # Enter sends from the operator prompt; Ctrl+Enter remains supported.
-            self._on_send(self.entry)
-            return True
-        elif keyval == Gdk.KEY_Escape:
-            # Escape clears entry (if not empty) or defocuses
-            text = self.entry.get_text().strip()
-            if text:
-                self.entry.set_text("")
-            else:
-                self.entry.set_can_focus(False)
-                self.entry.set_can_focus(True)
-            return True
-        return False
     
     def _on_send(self, widget):
         """Send message to local Ollama."""
@@ -2080,42 +1228,36 @@ class TalkColumn(Gtk.Box):
 
         self.entry.set_text("")
         
-        # Phase 3: Natural language routing — detect intent when in AUTO mode
-        detected_route = ""
-        effective_route = self._routing_mode
-        if self._routing_mode == "AUTO":
-            detected_route = self._detect_natural_language_intent(text)
-            if detected_route:
-                effective_route = detected_route
-                # Briefly flash the detected route in status
-                if self._status_label:
-                    self._status_label.set_label(f"🔀 AUTO → {detected_route}")
-                    # Reset after 3 seconds
-                    def _reset_status():
-                        if self._status_label:
-                            self._status_label.set_label("Ready")
-                        return False
-                    GLib.timeout_add_seconds(3, _reset_status)
-        
         # Pass operator controls to chat service (Chief's Truth Panel)
         self._chat_service.send_message(
             text, 
-            routing_mode=effective_route if effective_route != "AUTO" else "",
+            routing_mode=self._routing_mode if self._routing_mode != "AUTO" else "",
             pool=self._pool_mode if self._pool_mode != "AUTO" else ""
         )
 
 
 class ExecutionRunCard(Gtk.Box):
-    """Compact operational row for an execution run."""
+    """A card showing an execution run."""
     
     def __init__(self, run: ExecutionRun):
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.run = run
-        self.add_css_class("progression-row")
+        self.add_css_class("card")
         self.set_margin_start(12)
         self.set_margin_end(12)
-        self.set_margin_bottom(4)
-        self.set_margin_top(2)
+        self.set_margin_bottom(8)
+        
+        # Main content
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+        self.append(content)
+        
+        # Title row
+        title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        content.append(title_row)
         
         # Status icon
         status_icons = {
@@ -2133,96 +1275,54 @@ class ExecutionRunCard(Gtk.Box):
             icon.add_css_class("error")
         elif run.status == RunStatus.RUNNING:
             icon.add_css_class("accent")
-        self.append(icon)
+        title_row.append(icon)
         
-        # Name + owner/source
-        name_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        name_box.set_hexpand(True)
-        self.append(name_box)
-
+        # Name
         name_label = Gtk.Label(label=run.name)
         name_label.set_xalign(0)
+        name_label.set_hexpand(True)
         name_label.set_ellipsize(Pango.EllipsizeMode.END)
-        name_label.add_css_class("caption")
-        name_box.append(name_label)
-
-        meta_parts = []
-        if run.source:
-            meta_parts.append(run.source)
-        if run.owner:
-            meta_parts.append(f"@{run.owner}")
-        if meta_parts:
-            meta_label = Gtk.Label(label=" · ".join(meta_parts))
-            meta_label.set_xalign(0)
-            meta_label.add_css_class("caption")
-            meta_label.add_css_class("dim-label")
-            meta_label.set_ellipsize(Pango.EllipsizeMode.END)
-            name_box.append(meta_label)
+        title_row.append(name_label)
         
-        pct = run.progress_pct if run.progress_pct is not None else 0
-        pct_label = Gtk.Label(label=f"{pct}%")
-        pct_label.add_css_class("caption")
-        pct_label.add_css_class("monospace")
-        pct_label.set_width_chars(4)
-        self.append(pct_label)
-
-        age_label = Gtk.Label(label=self._format_age(run.started_at))
-        age_label.add_css_class("caption")
-        age_label.add_css_class("dim-label")
-        age_label.set_width_chars(7)
-        self.append(age_label)
-
-        status_text = "FAILED" if run.status == RunStatus.FAILED else run.status.value.upper()
+        # Progress bar (if running)
+        if run.status == RunStatus.RUNNING and run.progress_pct is not None:
+            progress = Gtk.ProgressBar()
+            progress.set_fraction(run.progress_pct / 100.0)
+            progress.set_text(f"{run.progress_pct}%")
+            progress.set_show_text(True)
+            content.append(progress)
+        
+        # Status text
+        status_text = run.status.value.upper()
+        if run.status == RunStatus.FAILED:
+            status_text = "⚠ FAILED"
         status_label = Gtk.Label(label=status_text)
         status_label.add_css_class("caption")
         status_label.add_css_class("dim-label")
-        status_label.set_width_chars(9)
-        self.append(status_label)
+        status_label.set_xalign(0)
+        content.append(status_label)
+        
+        # Action buttons
+        actions_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions_row.set_margin_top(4)
+        content.append(actions_row)
         
         if run.status == RunStatus.QUEUED:
-            run_btn = Gtk.Button(label="▶")
+            run_btn = Gtk.Button(label="▶ Run")
             run_btn.add_css_class("suggested-action")
-            run_btn.set_tooltip_text("Run")
             run_btn.connect("clicked", self._on_dispatch)
-            self.append(run_btn)
+            actions_row.append(run_btn)
         
         if run.status == RunStatus.RUNNING and run.can_cancel:
-            cancel_btn = Gtk.Button(label="■")
+            cancel_btn = Gtk.Button(label="⏹ Cancel")
             cancel_btn.add_css_class("destructive-action")
-            cancel_btn.set_tooltip_text("Cancel")
             cancel_btn.connect("clicked", self._on_cancel)
-            self.append(cancel_btn)
+            actions_row.append(cancel_btn)
         
-        logs_btn = Gtk.Button(label="Logs")
+        logs_btn = Gtk.Button(label="📋 Logs")
         logs_btn.add_css_class("flat")
-        logs_btn.add_css_class("caption")
         logs_btn.connect("clicked", self._on_logs)
-        self.append(logs_btn)
-
-        if run.receipt_path:
-            receipt_btn = Gtk.Button.new_from_icon_name("document-open-symbolic")
-            receipt_btn.add_css_class("flat")
-            receipt_btn.set_tooltip_text(str(run.receipt_path))
-            receipt_btn.connect("clicked", lambda _b: print(f"[Execute] Open receipt: {run.receipt_path}"))
-            self.append(receipt_btn)
-
-    def _format_age(self, started_at) -> str:
-        if not started_at:
-            return "--"
-        try:
-            if isinstance(started_at, str):
-                started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-            else:
-                started = started_at
-            now = datetime.now(started.tzinfo) if started.tzinfo else datetime.now()
-            seconds = max(0, int((now - started).total_seconds()))
-            if seconds < 60:
-                return f"{seconds}s"
-            if seconds < 3600:
-                return f"{seconds // 60}m"
-            return f"{seconds // 3600}h"
-        except Exception:
-            return "--"
+        actions_row.append(logs_btn)
     
     def _on_dispatch(self, button):
         """Dispatch run - TODO: call POST /api/runs/:id/dispatch."""
@@ -2248,89 +1348,52 @@ class ExecuteColumn(Gtk.Box):
         self._runs: List[ExecutionRun] = []
         
         self._build_ui()
-        self._load_data()
+        self._load_mock_data()
     
     def _build_ui(self):
-        # ── Safety Rail (Live System) ──
-        self.safety_rail = OperatorSafetyRail()
-        self.append(self.safety_rail)
-
-        # ── Progressions header ──
+        # Header
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.set_margin_top(12)
         header.set_margin_start(12)
         header.set_margin_end(12)
         header.set_margin_bottom(8)
         self.append(header)
-
+        
         title = Gtk.Label(label="Progressions")
         title.add_css_class("title-2")
         title.set_xalign(0)
         title.set_hexpand(True)
         header.append(title)
-
+        
         refresh_btn = Gtk.Button()
         refresh_btn.set_icon_name("view-refresh-symbolic")
         refresh_btn.add_css_class("flat")
-        refresh_btn.set_tooltip_text("Refresh from canonical sources")
-        refresh_btn.connect("clicked", self._on_refresh)
+        refresh_btn.set_tooltip_text("Refresh")
         header.append(refresh_btn)
-
-        # ── Runs list ──
+        
+        # Runs list
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.append(scrolled)
-
+        
         self.runs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         scrolled.set_child(self.runs_box)
-
-        # ── Quick actions footer ──
+        
+        # Quick actions footer
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         footer.set_margin_start(12)
         footer.set_margin_end(12)
         footer.set_margin_bottom(12)
         self.append(footer)
-
+        
         all_logs_btn = Gtk.Button(label="Open All Logs")
         all_logs_btn.add_css_class("flat")
         footer.append(all_logs_btn)
     
-    def update(self, data: dict):
-        """Update safety rail from daemon data."""
-        if hasattr(self, "safety_rail"):
-            self.safety_rail.update(data)
-
-    def _load_data(self):
-        """Load execution runs from canonical sources."""
-        raw_runs = OrchestratorTruthProvider.get_runs()
-        status_map = {
-            "queued": RunStatus.QUEUED,
-            "running": RunStatus.RUNNING,
-            "completed": RunStatus.COMPLETED,
-            "failed": RunStatus.FAILED,
-            "cancelled": RunStatus.CANCELLED,
-        }
-        self._runs = [
-            ExecutionRun(
-                id=r["id"],
-                name=r["name"],
-                type=r.get("type", "orchestrator"),
-                status=status_map.get(r["status"], RunStatus.QUEUED),
-                started_at=r.get("started_at"),
-                progress_pct=r.get("progress_pct"),
-                can_cancel=r.get("can_cancel", False),
-                owner=r.get("owner", ""),
-                source=r.get("source", ""),
-                receipt_path=r.get("receipt_path", ""),
-            )
-            for r in raw_runs
-        ]
+    def _load_mock_data(self):
+        self._runs = MockDataStore.get_mock_runs()
         self._refresh_list()
-
-    def _on_refresh(self, button):
-        """Refresh runs from canonical sources."""
-        self._load_data()
     
     def _refresh_list(self):
         # Clear
@@ -2341,16 +1404,8 @@ class ExecuteColumn(Gtk.Box):
             else:
                 break
         
-        order = {
-            RunStatus.FAILED: 0,
-            RunStatus.RUNNING: 1,
-            RunStatus.QUEUED: 2,
-            RunStatus.CANCELLED: 3,
-            RunStatus.COMPLETED: 4,
-        }
-
-        # Add runs, with blockers/running first and completed rows collapsed low.
-        for run in sorted(self._runs, key=lambda r: (order.get(r.status, 9), r.name.lower())):
+        # Add runs
+        for run in self._runs:
             card = ExecutionRunCard(run)
             self.runs_box.append(card)
 
@@ -2401,10 +1456,12 @@ class HomeConsolePage(Gtk.Box):
     def update(self, data: dict):
         """
         Update with daemon data.
-        Passes performance/system telemetry to Talk and Execute columns.
+        
+        TODO: This will need to:
+        1. Refresh inbox from a future orchestration API
+        2. Refresh runs from orchestrator
+        3. Update context chips in talk column
         """
-        if hasattr(self, "talk") and hasattr(self.talk, "update"):
-            self.talk.update(data)
-        if hasattr(self, "execute") and hasattr(self.execute, "update"):
-            self.execute.update(data)
+        # For now, just log that we received data
+        # The mock data is loaded on init
         pass

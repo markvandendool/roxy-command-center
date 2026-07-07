@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Overview Page — LifePanel Command Center.
-One glance tells Mark whether the estate is alive, useful, and safe.
+Overview page with dashboard cards.
+ROXY-CMD-STORY-013, ROXY-CMD-STORY-014: Overview dashboard.
 """
 
 import gi
@@ -10,532 +10,496 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
 from typing import Optional, Dict, Any
 
-from widgets.graph_widget import SparklineWidget
-from services.telemetry_collector import get_collector
+from widgets.graph_widget import SparklineWidget, GraphConfig
+from services.alert_manager import get_alert_manager, AlertSeverity
 
 
-class LifeCard(Gtk.Box):
-    """Compact live summary card for the LifePanel canvas."""
-
-    def __init__(self, title: str, icon_name: str = "", on_click: Optional[callable] = None):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+class OverviewCard(Gtk.Box):
+    """
+    A dashboard card showing a metric.
+    
+    Features:
+    - Large value display
+    - Subtitle/label
+    - Optional sparkline
+    - Click navigation
+    """
+    
+    def __init__(
+        self,
+        title: str,
+        icon_name: str = "",
+        show_sparkline: bool = False,
+        on_click: Optional[callable] = None
+    ):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add_css_class("overview-card")
-        self.add_css_class("moc-card")
-        self.set_margin_top(8)
-        self.set_margin_bottom(8)
-        self.set_margin_start(8)
-        self.set_margin_end(8)
+        
         self.on_click = on_click
-
+        self._sparkline: Optional[SparklineWidget] = None
+        
+        # Make clickable
         if on_click:
             click = Gtk.GestureClick()
-            click.connect("pressed", lambda g, n, x, y: on_click())
+            click.connect("pressed", self._on_clicked)
             self.add_controller(click)
             self.set_cursor_from_name("pointer")
-
+        
+        # Header with icon and title
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.append(header)
-
+        
         if icon_name:
             icon = Gtk.Image.new_from_icon_name(icon_name)
-            icon.set_pixel_size(18)
+            icon.set_pixel_size(20)
+            icon.add_css_class("dim-label")
             header.append(icon)
-
-        self.title_label = Gtk.Label(label=title)
-        self.title_label.add_css_class("overview-title")
-        self.title_label.set_xalign(0)
-        self.title_label.set_hexpand(True)
-        header.append(self.title_label)
-
+        
+        title_label = Gtk.Label(label=title)
+        title_label.add_css_class("overview-title")
+        title_label.add_css_class("dim-label")
+        title_label.set_xalign(0)
+        header.append(title_label)
+        
+        # Value display
         self.value_label = Gtk.Label(label="--")
         self.value_label.add_css_class("overview-value")
         self.value_label.set_xalign(0)
         self.append(self.value_label)
-
+        
+        # Subtitle
         self.subtitle_label = Gtk.Label(label="")
         self.subtitle_label.add_css_class("overview-subtitle")
+        self.subtitle_label.add_css_class("dim-label")
         self.subtitle_label.set_xalign(0)
-        self.subtitle_label.set_wrap(True)
         self.append(self.subtitle_label)
-
-        self.sparkline = SparklineWidget(color=(0.13, 0.77, 0.37))
-        self.sparkline.set_margin_top(4)
-        self.append(self.sparkline)
-
-    def set(self, value: str, subtitle: str = "", status: str = "healthy", history: list = None):
+        
+        # Sparkline
+        if show_sparkline:
+            self._sparkline = SparklineWidget(history_size=30)
+            self._sparkline.set_margin_top(8)
+            self.append(self._sparkline)
+    
+    def set_value(self, value: str):
+        """Set the main value."""
         self.value_label.set_label(value)
-        self.subtitle_label.set_label(subtitle)
-        self.remove_css_class("status-healthy")
-        self.remove_css_class("status-warn")
-        self.remove_css_class("status-blocked")
-        if status in ("healthy", "warn", "blocked"):
-            self.add_css_class(f"status-{status}")
-        if history is not None and len(history) >= 2:
-            self.sparkline.set_history(history)
-        else:
-            self.sparkline.set_history([])
+    
+    def set_subtitle(self, text: str):
+        """Set the subtitle."""
+        self.subtitle_label.set_label(text)
+    
+    def add_sparkline_value(self, value: float):
+        """Add a value to the sparkline."""
+        if self._sparkline:
+            self._sparkline.add_value(value)
+    
+    def set_sparkline_color(self, r: float, g: float, b: float):
+        """Set sparkline color."""
+        if self._sparkline:
+            self._sparkline._color = (r, g, b)
+            self._sparkline.queue_draw()
+    
+    def _on_clicked(self, gesture, n_press, x, y):
+        """Handle click."""
+        if self.on_click:
+            self.on_click()
 
 
 class OverviewPage(Gtk.ScrolledWindow):
-    """Native LifePanel home: object rail, mission canvas, procedure inspector."""
-
+    """
+    Overview dashboard with summary cards.
+    
+    Features:
+    - System stats cards
+    - GPU cards
+    - Service health
+    - Alert summary
+    - Quick navigation
+    """
+    
     def __init__(self, on_navigate: Optional[callable] = None):
         super().__init__()
         self.on_navigate = on_navigate
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self._cards: Dict[str, LifeCard] = {}
-        self._fact_rows: Dict[str, Dict[str, Gtk.Widget]] = {}
-        self._procedure_rows: Dict[str, Dict[str, Gtk.Widget]] = {}
+        
+        self._cards: Dict[str, OverviewCard] = {}
         self._build_ui()
-
+    
     def _build_ui(self):
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
-        outer.add_css_class("moc-surface")
-        outer.set_margin_top(18)
-        outer.set_margin_bottom(18)
-        outer.set_margin_start(18)
-        outer.set_margin_end(18)
-        self.set_child(outer)
-
-        title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        outer.append(title_row)
-
-        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        title_box.set_hexpand(True)
-        title_row.append(title_box)
-
-        title = Gtk.Label(label="Roxy LifePanel")
+        # Main container
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        main_box.set_margin_top(24)
+        main_box.set_margin_bottom(24)
+        main_box.set_margin_start(24)
+        main_box.set_margin_end(24)
+        self.set_child(main_box)
+        
+        # Title
+        title = Gtk.Label(label="System Overview")
         title.add_css_class("title-1")
         title.set_xalign(0)
-        title_box.append(title)
+        main_box.append(title)
+        
+        # Review-only posture labels
+        posture_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        posture_box.set_margin_top(4)
+        main_box.append(posture_box)
+        for text in ("Read-only", "Manual snapshot", "No background polling", "ROXY quiet baseline"):
+            label = Gtk.Label(label=text)
+            label.add_css_class("caption")
+            label.add_css_class("source-badge")
+            label.add_css_class("source-daemon")
+            posture_box.append(label)
 
-        self.status_strip = Gtk.Label(label="Loading live MOSCore truth...")
-        self.status_strip.add_css_class("caption")
-        self.status_strip.set_xalign(0)
-        title_box.append(self.status_strip)
+        # Law 0 / quiet-state row
+        quiet_title = Gtk.Label(label="Quiet Baseline")
+        quiet_title.add_css_class("title-3")
+        quiet_title.set_xalign(0)
+        quiet_title.set_margin_top(8)
+        main_box.append(quiet_title)
 
-        self.overall_chip = Gtk.Label(label="--")
-        self.overall_chip.add_css_class("moc-chip-info")
-        self.overall_chip.set_valign(Gtk.Align.CENTER)
-        title_row.append(self.overall_chip)
+        quiet_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        quiet_box.set_homogeneous(True)
+        main_box.append(quiet_box)
 
-        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
-        body.add_css_class("moc-mission-canvas")
-        outer.append(body)
+        law0_card = OverviewCard("Law 0", "security-high-symbolic")
+        self._cards["law0"] = law0_card
+        quiet_box.append(law0_card)
 
-        # Left rail: first-class live objects.
-        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        left.add_css_class("moc-rail")
-        left.set_size_request(270, -1)
-        body.append(left)
+        guard_card = OverviewCard("External Guard", "drive-removable-media-symbolic")
+        self._cards["external_guard"] = guard_card
+        quiet_box.append(guard_card)
 
-        left_title = Gtk.Label(label="Domain Objects")
-        left_title.add_css_class("moc-section-label")
-        left_title.set_xalign(0)
-        left.append(left_title)
+        idle_card = OverviewCard("CPU Idle", "utilities-system-monitor-symbolic", show_sparkline=True)
+        self._cards["cpu_idle"] = idle_card
+        quiet_box.append(idle_card)
 
-        for key, label, page in [
-            ("estate", "Roxy Estate", "overview"),
-            ("agents", "Agents", "agents"),
-            ("brain", "Brain Authority", "brain"),
-            ("models", "Model Lanes", "brain"),
-            ("mcp", "MCP Processes", "agents"),
-            ("proof", "Receipts / Proof", "receipts"),
-            ("storage", "Storage / Swap", "storage"),
-            ("health", "Health Gate", "services"),
-        ]:
-            left.append(self._create_fact_row(key, label, page))
+        thermal_card = OverviewCard("Thermal", "temperature-symbolic")
+        self._cards["thermal"] = thermal_card
+        quiet_box.append(thermal_card)
 
-        # Center canvas: live summary instruments.
-        center = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        center.set_hexpand(True)
-        body.append(center)
+        # Storage identity row
+        storage_title = Gtk.Label(label="Storage Identity")
+        storage_title.add_css_class("title-3")
+        storage_title.set_xalign(0)
+        storage_title.set_margin_top(16)
+        main_box.append(storage_title)
 
-        self.alert_label = Gtk.Label(label="")
-        self.alert_label.add_css_class("moc-panel")
-        self.alert_label.set_xalign(0)
-        self.alert_label.set_wrap(True)
-        center.append(self.alert_label)
+        storage_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        storage_box.set_homogeneous(True)
+        main_box.append(storage_box)
 
-        grid_title = Gtk.Label(label="Estate Instruments")
-        grid_title.add_css_class("moc-section-label")
-        grid_title.set_xalign(0)
-        center.append(grid_title)
+        root_card = OverviewCard("Root", "drive-harddisk-system-symbolic")
+        self._cards["root_disk"] = root_card
+        storage_box.append(root_card)
 
-        self.grid_box = Gtk.FlowBox()
-        self.grid_box.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.grid_box.set_homogeneous(True)
-        self.grid_box.set_min_children_per_line(2)
-        self.grid_box.set_max_children_per_line(4)
-        self.grid_box.set_column_spacing(12)
-        self.grid_box.set_row_spacing(12)
-        center.append(self.grid_box)
+        work_card = OverviewCard("Work", "drive-harddisk-symbolic")
+        self._cards["work_disk"] = work_card
+        storage_box.append(work_card)
 
-        cards = [
-            ("performance", "Performance", "preferences-system-symbolic", "performance"),
-            ("agents", "Agents", "applications-games-symbolic", "agents"),
-            ("brain", "Brain", "preferences-system-symbolic", "brain"),
-            ("executive", "Executive", "emblem-ok-symbolic", "executive"),
-            ("content", "Action Ladder", "folder-music-symbolic", "content"),
-            ("proof", "Proof", "emblem-ok-symbolic", "receipts"),
-            ("storage", "Storage", "drive-harddisk-symbolic", "storage"),
-            ("services", "Health Gate", "system-run-symbolic", "services"),
-        ]
+        p51_card = OverviewCard("P51 Vault", "media-flash-symbolic")
+        self._cards["p51"] = p51_card
+        storage_box.append(p51_card)
 
-        for key, card_title, icon, page in cards:
-            card = LifeCard(card_title, icon, on_click=lambda p=page: self._navigate(p))
-            self._cards[key] = card
-            self.grid_box.append(card)
+        safety_card = OverviewCard("ROXY_SAFETY", "dialog-warning-symbolic")
+        self._cards["roxy_safety"] = safety_card
+        storage_box.append(safety_card)
 
-        compact_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        compact_box.set_homogeneous(True)
-        center.append(compact_box)
+        # System stats row
+        stats_title = Gtk.Label(label="System Load")
+        stats_title.add_css_class("title-3")
+        stats_title.set_xalign(0)
+        stats_title.set_margin_top(16)
+        main_box.append(stats_title)
 
-        for key, card_title, icon in [
-            ("law0", "Law 0", "security-high-symbolic"),
-            ("external_guard", "Guard", "drive-removable-media-symbolic"),
-            ("thermal", "Thermal", "temperature-symbolic"),
-            ("citadel", "Citadel", "network-workgroup-symbolic"),
-        ]:
-            card = LifeCard(card_title, icon)
-            self._cards[key] = card
-            compact_box.append(card)
+        stats_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        stats_box.set_homogeneous(True)
+        main_box.append(stats_box)
+        
+        # CPU card
+        cpu_card = OverviewCard(
+            "CPU",
+            "computer-symbolic",
+            show_sparkline=True,
+            on_click=lambda: self._navigate("overview")
+        )
+        self._cards["cpu"] = cpu_card
+        stats_box.append(cpu_card)
+        
+        # Memory card
+        mem_card = OverviewCard(
+            "Memory",
+            "drive-harddisk-symbolic",
+            show_sparkline=True,
+            on_click=lambda: self._navigate("overview")
+        )
+        self._cards["memory"] = mem_card
+        stats_box.append(mem_card)
+        
+        # GPU section title
+        gpu_title = Gtk.Label(label="GPUs")
+        gpu_title.add_css_class("title-3")
+        gpu_title.set_xalign(0)
+        gpu_title.set_margin_top(16)
+        main_box.append(gpu_title)
+        
+        # GPU cards container
+        self.gpu_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        self.gpu_box.set_homogeneous(True)
+        main_box.append(self.gpu_box)
+        
+        # Placeholder GPU cards (will be populated by update)
+        for i in range(2):
+            card = OverviewCard(
+                f"GPU {i}",
+                "video-display-symbolic",
+                show_sparkline=True,
+                on_click=lambda: self._navigate("gpus")
+            )
+            self._cards[f"gpu{i}"] = card
+            self.gpu_box.append(card)
+        
+        # Services section
+        services_title = Gtk.Label(label="Services")
+        services_title.add_css_class("title-3")
+        services_title.set_xalign(0)
+        services_title.set_margin_top(16)
+        main_box.append(services_title)
+        
+        services_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        services_box.set_homogeneous(True)
+        main_box.append(services_box)
+        
+        # Ollama card
+        ollama_card = OverviewCard(
+            "Ollama",
+            "face-smile-big-symbolic",
+            on_click=lambda: self._navigate("ollama")
+        )
+        self._cards["ollama"] = ollama_card
+        services_box.append(ollama_card)
 
-        # Right inspector: procedures, risk, source age.
-        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        right.add_css_class("moc-inspector")
-        right.set_size_request(310, -1)
-        body.append(right)
+        # Docker card
+        docker_card = OverviewCard(
+            "Docker",
+            "applications-system-symbolic",
+            on_click=lambda: self._navigate("services")
+        )
+        self._cards["docker"] = docker_card
+        services_box.append(docker_card)
+        
+        # Services health card
+        health_card = OverviewCard(
+            "Service Health",
+            "system-run-symbolic",
+            on_click=lambda: self._navigate("services")
+        )
+        self._cards["services"] = health_card
+        services_box.append(health_card)
+        
+        # Alerts card
+        alerts_card = OverviewCard(
+            "Active Alerts",
+            "dialog-warning-symbolic",
+            on_click=lambda: self._navigate("alerts")
+        )
+        self._cards["alerts"] = alerts_card
+        services_box.append(alerts_card)
 
-        right_title = Gtk.Label(label="Procedure Inspector")
-        right_title.add_css_class("moc-section-label")
-        right_title.set_xalign(0)
-        right.append(right_title)
-
-        for key, label, page in [
-            ("sentinel", "Inspect Sentinel", "alerts"),
-            ("performance", "Stabilize Performance", "performance"),
-            ("agents", "Review Agents", "agents"),
-            ("brain", "Verify Brain", "brain"),
-            ("storage", "Protect Storage", "storage"),
-            ("proof", "Open Proof", "receipts"),
-        ]:
-            right.append(self._create_procedure_row(key, label, page))
-
-        footer_title = Gtk.Label(label="Kernel Facts")
-        footer_title.add_css_class("moc-section-label")
-        footer_title.set_xalign(0)
-        footer_title.set_margin_top(8)
-        right.append(footer_title)
-
-        self.source_label = Gtk.Label(label="Source: --")
-        self.source_label.add_css_class("moc-row-subtitle")
-        self.source_label.set_xalign(0)
-        self.source_label.set_wrap(True)
-        right.append(self.source_label)
-
-        self.footer_label = Gtk.Label(label="")
-        self.footer_label.add_css_class("monospace-small")
-        self.footer_label.set_xalign(0)
-        self.footer_label.set_wrap(True)
-        right.append(self.footer_label)
-
-    def _create_fact_row(self, key: str, title: str, page: Optional[str] = None) -> Gtk.Box:
-        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        row.add_css_class("moc-object-row")
-        if page:
-            click = Gtk.GestureClick()
-            click.connect("pressed", lambda g, n, x, y, p=page: self._navigate(p))
-            row.add_controller(click)
-            row.set_cursor_from_name("pointer")
-
-        title_label = Gtk.Label(label=title)
-        title_label.add_css_class("moc-row-title")
-        title_label.set_xalign(0)
-        row.append(title_label)
-
-        value_label = Gtk.Label(label="--")
-        value_label.add_css_class("moc-row-value")
-        value_label.set_xalign(0)
-        row.append(value_label)
-
-        subtitle_label = Gtk.Label(label="")
-        subtitle_label.add_css_class("moc-row-subtitle")
-        subtitle_label.set_xalign(0)
-        subtitle_label.set_wrap(True)
-        row.append(subtitle_label)
-
-        self._fact_rows[key] = {"row": row, "value": value_label, "subtitle": subtitle_label}
-        return row
-
-    def _create_procedure_row(self, key: str, title: str, page: Optional[str] = None) -> Gtk.Box:
-        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        row.add_css_class("moc-procedure-row")
-        if page:
-            click = Gtk.GestureClick()
-            click.connect("pressed", lambda g, n, x, y, p=page: self._navigate(p))
-            row.add_controller(click)
-            row.set_cursor_from_name("pointer")
-
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.append(top)
-
-        title_label = Gtk.Label(label=title)
-        title_label.add_css_class("moc-row-title")
-        title_label.set_xalign(0)
-        title_label.set_hexpand(True)
-        top.append(title_label)
-
-        chip = Gtk.Label(label="--")
-        chip.add_css_class("moc-chip-info")
-        top.append(chip)
-
-        detail = Gtk.Label(label="")
-        detail.add_css_class("moc-row-subtitle")
-        detail.set_xalign(0)
-        detail.set_wrap(True)
-        row.append(detail)
-
-        self._procedure_rows[key] = {"row": row, "chip": chip, "detail": detail}
-        return row
-
+        # SMART watch note
+        smart_card = OverviewCard("Samsung SMART Watch", "dialog-information-symbolic")
+        self._cards["smart_watch"] = smart_card
+        main_box.append(smart_card)
+    
     def _navigate(self, page: str):
+        """Navigate to a page."""
         if self.on_navigate:
             self.on_navigate(page)
-
-    def _set_fact(self, key: str, value: str, subtitle: str, status: str = "healthy"):
-        item = self._fact_rows.get(key)
-        if not item:
-            return
-        item["value"].set_label(value)
-        item["subtitle"].set_label(subtitle)
-        self._set_status_class(item["row"], status)
-
-    def _set_procedure(self, key: str, state: str, detail: str, status: str = "healthy"):
-        item = self._procedure_rows.get(key)
-        if not item:
-            return
-        chip = item["chip"]
-        chip.set_label(state)
-        self._set_chip_class(chip, status)
-        item["detail"].set_label(detail)
-        self._set_status_class(item["row"], status)
-
-    def _set_status_class(self, widget: Gtk.Widget, status: str):
-        widget.remove_css_class("status-healthy")
-        widget.remove_css_class("status-warn")
-        widget.remove_css_class("status-blocked")
-        if status in ("healthy", "warn", "blocked"):
-            widget.add_css_class(f"status-{status}")
-
-    def _set_chip_class(self, widget: Gtk.Widget, status: str):
-        for cls in ("moc-chip-success", "moc-chip-warning", "moc-chip-danger", "moc-chip-info", "moc-chip-regent"):
-            widget.remove_css_class(cls)
-        css = {
-            "healthy": "moc-chip-success",
-            "warn": "moc-chip-warning",
-            "blocked": "moc-chip-danger",
-            "regent": "moc-chip-regent",
-        }.get(status, "moc-chip-info")
-        widget.add_css_class(css)
-
-    def _status_for(self, value: str) -> str:
-        normalized = str(value or "").lower()
-        if normalized in ("red", "blocked", "error", "fail", "failed", "down"):
-            return "blocked"
-        if normalized in ("yellow", "warn", "warning", "degraded", "attention", "accumulating"):
-            return "warn"
-        return "healthy"
-
+    
     def update(self, data: dict):
-        """Update LifePanel cards. Sparklines only redraw when this page is visible."""
-        perf = data.get("performance", {})
-        agents = perf.get("agents", {})
-        brain = data.get("brainAuthority", {})
-        judge = data.get("judgeAuthority", {})
-        closure = data.get("sovereignClosure", {})
-        citadel = data.get("citadel", {})
-        health_gate = data.get("healthGate", {})
-        gateway = data.get("gateway", {})
-        llm235 = data.get("llm235b", {})
-        qdrant = data.get("qdrant", {})
-        overall = data.get("overall", "?")
-        operator_overall = data.get("operatorOverall", overall)
-        next_action = data.get("nextAction", "") or "No owner action in current snapshot."
-        generated_at = data.get("generatedAt", "unknown")
-
-        is_visible = self.get_visible()
-
-        # Top status.
-        self.status_strip.set_label(f"Estate {overall} · Operator {operator_overall} · {generated_at}")
-        status = self._status_for(operator_overall if operator_overall != "GREEN" else overall)
-        self.overall_chip.set_label(f"OPERATOR {operator_overall}")
-        self._set_chip_class(self.overall_chip, status)
-        self.alert_label.set_label(next_action)
-        self._set_status_class(self.alert_label, status)
-
-        # Shared source values.
-        cpu = perf.get("cpu", {})
-        util = float(cpu.get("utilPct", 0) or 0)
-        load1 = float(cpu.get("load1", 0) or 0)
-        load5 = float(cpu.get("load5", 0) or 0)
-        gpus = (perf.get("gpu") or {}).get("gpus", []) or data.get("gpus", [])
-        gpu_count = len(gpus) or int((perf.get("gpu") or {}).get("count", 0) or 0)
-        gpu_max_util = max((float(g.get("utilPct", g.get("utilization_pct", 0)) or 0) for g in gpus), default=0)
-        gpu_hot = max((float(g.get("tempC", g.get("temp_c", 0)) or 0) for g in gpus), default=0)
-        host_mem = data.get("hostMemory", {})
-        ram = host_mem.get("ram", {})
-        swap = host_mem.get("swap", {})
-        ram_used = float(ram.get("usedGb", ram.get("used_gb", 0)) or 0)
-        ram_total = float(ram.get("totalGb", ram.get("total_gb", 0)) or 0)
-        ram_pct = (ram_used / ram_total * 100) if ram_total > 0 else 0
-        swap_used = float(swap.get("swapUsedGb", swap.get("usedGb", 0)) or 0)
-        swap_total = float(swap.get("swapTotalGb", swap.get("totalGb", 32)) or 32)
-        swap_pct = (swap_used / swap_total * 100) if swap_total > 0 else 0
-        mcp = perf.get("mcp", {})
-        mcp_total = int(mcp.get("total", 0) or 0)
-        mcp_counts = mcp.get("counts", {})
-        top_mcp = max(mcp_counts.items(), key=lambda item: item[1])[0] if mcp_counts else "none"
-        action_ladder = data.get("actionLadderSummary") or []
-        action_done = sum(1 for item in action_ladder if str(item.get("gate", "")).lower() == "done")
-        health_checks = health_gate.get("checks", {})
-        health_pass = sum(1 for v in health_checks.values() if v == "pass")
-        services = data.get("services") or {}
-
-        # Left object rail.
-        self._set_fact("estate", str(overall), f"Operator {operator_overall}", self._status_for(operator_overall))
-        self._set_fact(
-            "agents",
-            f"{agents.get('active', 0)}/{agents.get('total', 0)}",
-            f"{agents.get('abandoned', 0)} abandoned · {mcp_total} MCP",
-            "blocked" if agents.get("abandoned", 0) > 5 else "warn" if agents.get("abandoned", 0) else "healthy",
-        )
-        self._set_fact(
-            "brain",
-            brain.get("verdict", "?"),
-            f"{brain.get('realBrain', {}).get('messages', 0)} messages · Qdrant {qdrant.get('status', '?')}",
-            self._status_for(brain.get("status", "")),
-        )
-        self._set_fact(
-            "models",
-            str(gateway.get("models", 0)),
-            f"235B {'reachable' if llm235.get('reachable') else 'offline'} · port {gateway.get('port', 4000)}",
-            "healthy" if gateway.get("status") == "healthy" and llm235.get("reachable") else "warn",
-        )
-        self._set_fact("mcp", str(mcp_total), f"Top group: {top_mcp}", "blocked" if mcp_total > 80 else "warn" if mcp_total > 50 else "healthy")
-        self._set_fact(
-            "proof",
-            judge.get("verdict", "?"),
-            f"Pass rate {judge.get('reputation', {}).get('passRate', 0):.0%}",
-            self._status_for(judge.get("status", "")),
-        )
-        self._set_fact(
-            "storage",
-            f"{swap_pct:.0f}% swap",
-            f"RAM {ram_used:.1f}/{ram_total:.0f} GB",
-            "blocked" if swap_pct > 80 else "warn" if swap_pct > 50 else "healthy",
-        )
-        self._set_fact(
-            "health",
-            health_gate.get("status", "?"),
-            f"{health_pass}/{len(health_checks)} checks pass",
-            self._status_for(health_gate.get("status", "")),
-        )
-
-        # Center cards.
-        coll = get_collector()
-
-        if "performance" in self._cards:
-            c = self._cards["performance"]
-            perf_card_status = "blocked" if util > 80 else "warn" if perf.get("status") == "warn" or util > 60 else "healthy"
-            c.set(f"{util:.0f}%", f"Load {load1:.1f} · GPU max {gpu_max_util:.0f}%", perf_card_status,
-                  history=coll.get("cpu") if is_visible else None)
-
-        if "agents" in self._cards:
-            abandoned = int(agents.get("abandoned", 0) or 0)
-            total = int(agents.get("total", 0) or 0)
-            c = self._cards["agents"]
-            c.set(str(total), f"{agents.get('active', 0)} active · {abandoned} abandoned",
-                  "blocked" if abandoned > 5 else "warn" if abandoned else "healthy",
-                  history=coll.get("agents") if is_visible else None)
-
-        if "brain" in self._cards:
-            brain_ok = brain.get("status") == "healthy"
-            c = self._cards["brain"]
-            c.set(brain.get("verdict", "?"), f"{gateway.get('models', 0)} models · Qdrant {qdrant.get('status', '?')}",
-                  "healthy" if brain_ok else "warn")
-
-        if "executive" in self._cards:
-            campaigns = int(closure.get("campaignsConverged", 0) or 0)
-            total_campaigns = int(closure.get("campaignsTotal", 1) or 1)
-            c = self._cards["executive"]
-            c.set(f"{campaigns}/{total_campaigns}", f"Sovereignty {closure.get('sovereignty', 0)}",
-                  self._status_for(closure.get("status", "")))
-
-        if "content" in self._cards:
-            c = self._cards["content"]
-            if action_ladder:
-                c.set(f"{action_done}/{len(action_ladder)}", "Apex action ladder gates",
-                      "healthy" if action_done == len(action_ladder) else "warn")
-            else:
-                c.set("n/a", "No action ladder in snapshot", "warn")
-
-        if "proof" in self._cards:
-            judge_ok = judge.get("status") == "healthy"
-            c = self._cards["proof"]
-            c.set(judge.get("verdict", "?"), "Judge authority", "healthy" if judge_ok else "warn")
-
-        if "storage" in self._cards:
-            c = self._cards["storage"]
-            c.set(f"{swap_pct:.0f}%", f"Swap {swap_used:.1f}/{swap_total:.0f} GB",
-                  "blocked" if swap_pct > 80 else "warn" if swap_pct > 50 else "healthy",
-                  history=coll.get("swap") if is_visible else None)
-
-        if "services" in self._cards:
-            c = self._cards["services"]
-            if services:
-                healthy = sum(1 for s in services.values() if s.get("health") in ("ok", "healthy"))
-                total_svcs = len(services)
-                c.set(f"{healthy}/{total_svcs}", "Live system services",
-                      "healthy" if healthy == total_svcs else "warn")
-            else:
-                c.set(health_gate.get("status", "?"), f"{health_pass}/{len(health_checks)} health checks",
-                      self._status_for(health_gate.get("status", "")))
-
+        """Update all cards with daemon data."""
+        # Use normalized schema
+        cpu_data = data.get("cpu", {})
+        memory_data = data.get("memory", {})
+        gpus = data.get("gpus", [])
+        services = data.get("services", {})
+        ollama = data.get("ollama", {})
         roxy = data.get("roxy", {})
-        law0_ok = roxy.get("law0_ok", False)
-        if "law0" in self._cards:
-            c = self._cards["law0"]
-            c.set("PASS" if law0_ok else "FAIL", "Read-only gate", "healthy" if law0_ok else "blocked")
-
-        guard_ok = roxy.get("external_guard_ok", False)
-        if "external_guard" in self._cards:
-            c = self._cards["external_guard"]
-            c.set("PASS" if guard_ok else "FAIL", "External media", "healthy" if guard_ok else "blocked")
-
+        storage = data.get("storage", {})
         idle = data.get("idle_health", {})
+        alerts = data.get("alerts", [])
+
+        def set_pass_fail(card_key: str, ok: bool, good: str = "PASS", bad: str = "FAIL", subtitle: str = ""):
+            if card_key not in self._cards:
+                return
+            card = self._cards[card_key]
+            card.set_value(good if ok else bad)
+            card.set_subtitle(subtitle)
+            if ok:
+                card.remove_css_class("status-warning")
+                card.remove_css_class("status-critical")
+            else:
+                card.add_css_class("status-critical")
+
+        def set_usage_card(card_key: str, volume: dict, expected: str):
+            if card_key not in self._cards:
+                return
+            used_pct = volume.get("used_pct", 0.0)
+            label = volume.get("label", expected)
+            free_gb = volume.get("free_gb", 0.0)
+            self._cards[card_key].set_value(f"{used_pct:.0f}%")
+            self._cards[card_key].set_subtitle(f"{label} · {free_gb:.0f} GB free")
+        
+        # CPU - use normalized keys
+        cpu_percent = cpu_data.get("cpu_pct", 0)
+        load_1m = cpu_data.get("load_1m", 0)
+        if "cpu" in self._cards:
+            self._cards["cpu"].set_value(f"{cpu_percent:.0f}%")
+            self._cards["cpu"].set_subtitle(f"Load: {load_1m:.1f}")
+            self._cards["cpu"].add_sparkline_value(cpu_percent)
+
+        # Law 0 / guard state
+        set_pass_fail("law0", bool(roxy.get("law0_ok")), subtitle="Read-only gate")
+        set_pass_fail("external_guard", bool(roxy.get("external_guard_ok")), subtitle="External media policy")
+
+        # Idle health
+        idle_pct = idle.get("cpu_idle_pct", 0.0)
+        load_5m = idle.get("load_5m", 0.0)
+        logical_cpus = idle.get("logical_cpus", 0)
+        if "cpu_idle" in self._cards:
+            self._cards["cpu_idle"].set_value(f"{idle_pct:.0f}%")
+            self._cards["cpu_idle"].set_subtitle(f"Load {load_5m:.2f} / {logical_cpus} threads")
+            self._cards["cpu_idle"].add_sparkline_value(idle_pct)
+
         temp = idle.get("temperature", {})
-        hottest = float(temp.get("hottest_c", 0) or 0)
+        hottest = temp.get("hottest_c", 0.0)
+        thermal_status = temp.get("status", "unknown")
         if "thermal" in self._cards:
-            c = self._cards["thermal"]
-            c.set(f"{hottest:.0f}C", temp.get("status", "?").title(),
-                  "blocked" if hottest > 80 else "warn" if hottest > 60 else "healthy")
+            self._cards["thermal"].set_value(thermal_status.title())
+            self._cards["thermal"].set_subtitle(f"Hottest {hottest:.0f}°C")
 
-        citadel_overall = citadel.get("overall", "?")
-        if "citadel" in self._cards:
-            c = self._cards["citadel"]
-            c.set(citadel_overall, "Citadel status", self._status_for(citadel_overall))
+        # Storage identity and guarded externals
+        set_usage_card("root_disk", storage.get("root", {}), "ROXY_ROOT")
+        set_usage_card("work_disk", storage.get("work", {}), "ROXY_WORK")
+        externals = storage.get("externals", {})
+        if "p51" in self._cards:
+            p51_visible = bool(externals.get("p51_visible"))
+            self._cards["p51"].set_value("Visible" if p51_visible else "Absent")
+            self._cards["p51"].set_subtitle("Read-only source vault" if p51_visible else "USB vault not mounted")
+        if "roxy_safety" in self._cards:
+            safety_mounted = bool(externals.get("roxy_safety_mounted"))
+            self._cards["roxy_safety"].set_value("Mounted" if safety_mounted else "Blocked")
+            self._cards["roxy_safety"].set_subtitle("Unsafe: unmount now" if safety_mounted else "Not mounted / ignored")
+            if safety_mounted:
+                self._cards["roxy_safety"].add_css_class("status-critical")
+            else:
+                self._cards["roxy_safety"].remove_css_class("status-critical")
+        
+        # Memory - use normalized keys
+        mem_used = memory_data.get("mem_used_gb", 0)
+        mem_total = memory_data.get("mem_total_gb", 1)
+        mem_percent = (mem_used / mem_total * 100) if mem_total > 0 else 0
+        if "memory" in self._cards:
+            self._cards["memory"].set_value(f"{mem_used:.1f} GB")
+            self._cards["memory"].set_subtitle(f"{mem_percent:.0f}% of {mem_total:.0f} GB")
+            self._cards["memory"].add_sparkline_value(mem_percent)
+        
+        # GPUs
+        for i, gpu in enumerate(gpus[:2]):  # Max 2 GPU cards
+            card_key = f"gpu{i}"
+            if card_key in self._cards:
+                card = self._cards[card_key]
+                
+                name = gpu.get("name", f"GPU {i}")
+                temp = gpu.get("temp_c", gpu.get("temp", 0))  # temp_c normalized, fallback temp
+                vram_used = gpu.get("vram_used_gb", 0)
+                vram_total = gpu.get("vram_total_gb", 1)
+                vram_percent = (vram_used / vram_total * 100) if vram_total > 0 else 0
+                util_pct = gpu.get("utilization_pct", gpu.get("utilization", 0))
+                pool = gpu.get("pool", "")
+                
+                # Truncate name
+                if len(name) > 20:
+                    name = name[:17] + "..."
+                
+                card.set_value(f"{temp}°C")
+                card.set_subtitle(f"{vram_used:.1f}/{vram_total:.0f} GB • {util_pct}%")
+                card.add_sparkline_value(temp)
+                
+                # Color by temp
+                if temp >= 80:
+                    card.set_sparkline_color(0.937, 0.267, 0.267)  # Red
+                elif temp >= 60:
+                    card.set_sparkline_color(0.961, 0.620, 0.043)  # Orange
+                else:
+                    card.set_sparkline_color(0.133, 0.773, 0.369)  # Green
+        
+        # Ollama
+        loaded_models = ollama.get("models", [])
+        if "ollama" in self._cards:
+            model_count = len(loaded_models)
+            reachable = ollama.get("reachable", False)
+            active = idle.get("ollama_active_workloads", 0)
+            model_names = [m.get("name", "unknown") for m in loaded_models[:2]]
+            self._cards["ollama"].set_value("Online" if reachable else "Offline")
+            subtitle = f"{model_count} model · {active} active"
+            if model_names:
+                subtitle = f"{', '.join(model_names)} · {active} active"
+            self._cards["ollama"].set_subtitle(subtitle)
 
-        # Procedure inspector.
-        self._set_procedure("sentinel", operator_overall, next_action, status)
-        self._set_procedure("performance", perf.get("status", "?").upper(), f"CPU {util:.1f}% · load5 {load5:.1f} · GPU hot {gpu_hot:.0f}C", self._status_for(perf.get("status", "")))
-        self._set_procedure("agents", f"{agents.get('abandoned', 0)} stuck", f"{agents.get('active', 0)} active of {agents.get('total', 0)} total", "blocked" if agents.get("abandoned", 0) > 5 else "warn" if agents.get("abandoned", 0) else "healthy")
-        self._set_procedure("brain", brain.get("verdict", "?"), f"Brain {brain.get('status', '?')} · Qdrant {qdrant.get('status', '?')}", self._status_for(brain.get("status", "")))
-        self._set_procedure("storage", f"{swap_pct:.0f}%", f"Swap {swap_used:.1f}/{swap_total:.0f} GB · RAM {ram_pct:.0f}%", "blocked" if swap_pct > 80 else "warn" if swap_pct > 50 else "healthy")
-        self._set_procedure("proof", judge.get("verdict", "?"), judge.get("note", "")[:100], self._status_for(judge.get("status", "")))
+        if "docker" in self._cards:
+            docker = services.get("docker", {})
+            count = idle.get("docker_container_count", 0)
+            active = docker.get("active", False)
+            self._cards["docker"].set_value(f"{count} running")
+            self._cards["docker"].set_subtitle("/mnt/work/containers/docker" if active else "service inactive")
+        
+        # Services health
+        if "services" in self._cards:
+            healthy = 0
+            unhealthy = 0
+            for name, service in services.items():
+                health = service.get("health", "unknown")
+                if health in ("ok", "healthy"):
+                    healthy += 1
+                else:
+                    unhealthy += 1
+            
+            total = healthy + unhealthy
+            self._cards["services"].set_value(f"{healthy}/{total}")
+            
+            if unhealthy > 0:
+                self._cards["services"].set_subtitle(f"{unhealthy} unhealthy")
+                self._cards["services"].add_css_class("status-warning")
+            else:
+                self._cards["services"].set_subtitle("All healthy")
+                self._cards["services"].remove_css_class("status-warning")
+        
+        # Alerts
+        if "alerts" in self._cards:
+            alert_manager = get_alert_manager()
+            managed_alert_count = alert_manager.get_alert_count()
+            managed_critical_count = alert_manager.get_alert_count(AlertSeverity.CRITICAL)
+            payload_critical_count = len([a for a in alerts if a.get("level") == "error"])
+            payload_warning_count = len([a for a in alerts if a.get("level") == "warning"])
+            alert_count = managed_alert_count + len(alerts)
+            critical_count = managed_critical_count + payload_critical_count
+            
+            self._cards["alerts"].set_value(str(alert_count))
+            
+            if critical_count > 0:
+                self._cards["alerts"].set_subtitle(f"{critical_count} critical")
+                self._cards["alerts"].add_css_class("status-critical")
+            elif alert_count > 0:
+                self._cards["alerts"].set_subtitle(f"{alert_count} warnings")
+                self._cards["alerts"].add_css_class("status-warning")
+            else:
+                self._cards["alerts"].set_subtitle("All clear")
+                self._cards["alerts"].remove_css_class("status-critical")
+                self._cards["alerts"].remove_css_class("status-warning")
 
-        self.source_label.set_label(f"Source: ~/.roxy/apex-status.json · generated {generated_at}")
-        self.footer_label.set_label(
-            f"GPUs: {gpu_count} · MCP: {mcp_total} · "
-            f"Agents: {agents.get('total', 0)} · Health checks: {health_pass}/{len(health_checks)}"
-        )
+        if "smart_watch" in self._cards:
+            failed_units = idle.get("failed_unit_count", 0)
+            note = idle.get("samsung_smart_note", "")
+            self._cards["smart_watch"].set_value("Watchlist")
+            self._cards["smart_watch"].set_subtitle(f"{failed_units} failed units · {note}")
