@@ -36,6 +36,10 @@ install -m 0644 "$ROOT/$DESKTOP_FILE" "$APPLICATIONS_DIR/$DESKTOP_FILE"
 install -m 0644 "$ROOT/$DESKTOP_FILE" "$AUTOSTART_DIR/$DESKTOP_FILE"
 install -m 0644 "$ROOT/assets/$ICON_FILE" "$ICON_DIR/$ICON_FILE"
 
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$APPLICATIONS_DIR"
+fi
+
 desktop-file-validate "$APPLICATIONS_DIR/$DESKTOP_FILE"
 desktop-file-validate "$AUTOSTART_DIR/$DESKTOP_FILE"
 check_installation
