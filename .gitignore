@@ -40,3 +40,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local native pixel-capture scratch space
+/output/native-proof/
