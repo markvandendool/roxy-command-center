@@ -4,12 +4,12 @@ Home Console Page - The ROXY Command Center cockpit.
 
 NORTH STAR: Home = Talk + Triage + Execute
 - Not a dashboard. An operations console.
-- GTK is thin client; current review build uses local Ollama directly.
+- GTK is a thin client; owner-facing chat uses the ROXY harness.
 
 Layout:
   [Left: Triage/Inbox]  [Center: Roxy Chat]  [Right: Progressions/Runs]
 
-Chat is wired to local Ollama through ChatService.
+Chat is wired through roxy-chat-proxy to governed model lanes.
 Voice is Option B: Speak button toggle (not auto-speak).
 """
 
@@ -99,6 +99,14 @@ class ChatMessage:
     role: str           # "user" or "assistant" or "system"
     content: str
     timestamp: datetime
+    model: str = ""
+    latency_ms: int = 0
+    route_summary: str = ""
+    persistence_status: str = ""
+    session_id: str = ""
+    provider_tps: float = 0.0
+    degraded_fallback: bool = False
+    harness_bypassed: bool = False
 
 
 # =============================================================================
@@ -554,9 +562,27 @@ class ChatMessage_Widget(Gtk.Box):
             content_label.set_selectable(True)  # Enable text selection
             bubble.append(content_label)
 
+            if not is_user and message.model:
+                provenance = Gtk.Label(
+                    label=(
+                        f"{message.model} | {message.latency_ms}ms | "
+                        f"{message.route_summary} | persistence={message.persistence_status} | "
+                        f"fallback={str(message.degraded_fallback).lower()} | "
+                        f"bypass={str(message.harness_bypassed).lower()} | "
+                        f"provider={message.provider_tps:.1f} tok/s | session={message.session_id}"
+                    )
+                )
+                provenance.add_css_class("caption")
+                provenance.add_css_class("dim-label")
+                provenance.set_xalign(0)
+                provenance.set_wrap(True)
+                provenance.set_selectable(True)
+                provenance.set_tooltip_text(f"session={message.session_id}")
+                bubble.append(provenance)
+
 
 class TalkColumn(Gtk.Box):
-    """Center column: Roxy Conversation using local Ollama."""
+    """Center column: governed Roxy conversation through the harness."""
     
     def __init__(self):
         print("[TalkColumn] ========== INIT BEGIN ==========" )
@@ -630,7 +656,7 @@ class TalkColumn(Gtk.Box):
                 if idx_route < len(routes):
                     data["route_mode"] = routes[idx_route]
             
-            pools = ["AUTO", "ROXY"]
+            pools = ["AUTO", "FRONTIER", "JUDGE", "LOCAL", "CLOUD"]
             if hasattr(self, '_pool_dropdown'):
                 idx_pool = self._pool_dropdown.get_selected()
                 if idx_pool < len(pools):
@@ -659,7 +685,7 @@ class TalkColumn(Gtk.Box):
                 print(f"[Talk] Loaded sticky route: {route}")
             
             pool = data.get("pool_mode", "AUTO")
-            pools = ["AUTO", "ROXY"]
+            pools = ["AUTO", "FRONTIER", "JUDGE", "LOCAL", "CLOUD"]
             if pool in pools and hasattr(self, '_pool_dropdown'):
                 self._pool_dropdown.set_selected(pools.index(pool))
                 self._pool_mode = pool
@@ -867,15 +893,19 @@ class TalkColumn(Gtk.Box):
         self._route_dropdown.connect("notify::selected", self._on_route_changed)
         operator_box.append(self._route_dropdown)
         
-        # Pool: current ROXY has one Ollama runtime.
-        pool_label = Gtk.Label(label="Pool:")
+        # Explicit governed model lane.
+        pool_label = Gtk.Label(label="Lane:")
         pool_label.add_css_class("dim-label")
         pool_label.set_margin_start(12)
         operator_box.append(pool_label)
 
-        self._pool_dropdown = Gtk.DropDown.new_from_strings(["AUTO", "ROXY"])
+        self._pool_dropdown = Gtk.DropDown.new_from_strings(
+            ["AUTO", "FRONTIER", "JUDGE", "LOCAL", "CLOUD"]
+        )
         self._pool_dropdown.set_selected(0)  # AUTO by default
-        self._pool_dropdown.set_tooltip_text("AUTO=local ROXY Ollama on port 11434")
+        self._pool_dropdown.set_tooltip_text(
+            "FRONTIER=ROXY harness :4001 -> LiteLLM :4000 -> Ada :8085"
+        )
         self._pool_dropdown.connect("notify::selected", self._on_pool_changed)
         operator_box.append(self._pool_dropdown)
         
@@ -917,7 +947,7 @@ class TalkColumn(Gtk.Box):
         input_row.append(send_btn)
     
     def _connect_to_roxy(self):
-        """Connect to local Ollama via ChatService."""
+        """Connect to the canonical ROXY harness via ChatService."""
         self._chat_service.connect(
             identity=ServiceIdentity.MINDSONG,
             on_message=self._on_chat_message,
@@ -962,7 +992,7 @@ class TalkColumn(Gtk.Box):
         GLib.idle_add(self._poll_info)
     
     def _poll_info(self) -> bool:
-        """Fetch local Ollama status and update Truth Panel chips."""
+        """Fetch ROXY harness status and update Truth Panel chips."""
         # Skip if previous fetch still in progress (prevents thread accumulation)
         if getattr(self, '_info_fetch_pending', False):
             return True
@@ -974,17 +1004,13 @@ class TalkColumn(Gtk.Box):
             try:
                 import urllib.request
                 import json
-                req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+                req = urllib.request.Request("http://127.0.0.1:4001/health")
                 req.add_header("User-Agent", "roxy-command-center/truth-panel")
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     payload = json.loads(resp.read().decode())
                     data = {
                         "server_time_iso": datetime.now().isoformat(),
-                        "ollama": {
-                            "reachable": True,
-                            "base_url": "http://127.0.0.1:11434",
-                            "models": payload.get("models", []),
-                        },
+                        "harness": payload,
                     }
                     GLib.idle_add(self._update_truth_panel, data)
             except Exception as e:
@@ -1017,18 +1043,19 @@ class TalkColumn(Gtk.Box):
             self._git_chip.set_tooltip_text(git.get("last_commit_subject", ""))
         
         if self._ollama_chip:
-            ollama = data.get("ollama", {})
-            reachable = bool(ollama.get("reachable"))
-            model_count = len(ollama.get("models", []))
-            url = ollama.get("base_url") or ollama.get("url") or "http://127.0.0.1:11434"
-
-            self._ollama_chip.set_label(f"🦙 {'ok' if reachable else 'err'} ({model_count})")
+            harness = data.get("harness", {})
+            proxy_ok = harness.get("ok") is True
+            upstream_ok = harness.get("upstreamReachable") is True
+            self._ollama_chip.set_label(
+                f"🧠 {'ok' if proxy_ok and upstream_ok else 'degraded'} :4001"
+            )
             self._ollama_chip.set_tooltip_text(
-                f"Ollama: {url}\nmodels: {model_count}" +
-                (f"\nerror: {ollama.get('error')}" if ollama.get("error") else "")
+                f"ROXY harness: http://127.0.0.1:4001\n"
+                f"proxy: {proxy_ok}\nupstream: {upstream_ok}\n"
+                f"persistence: {harness.get('storage', {}).get('status', 'unknown')}"
             )
 
-            if reachable:
+            if proxy_ok and upstream_ok:
                 self._ollama_chip.remove_css_class("error")
             else:
                 self._ollama_chip.add_css_class("error")
@@ -1070,8 +1097,8 @@ class TalkColumn(Gtk.Box):
         if self._git_chip:
             self._git_chip.set_label("🔀 --")
         if self._ollama_chip:
-            self._ollama_chip.set_label("🦙 ❌")
-            self._ollama_chip.set_tooltip_text(f"Ollama status unavailable: {error}")
+            self._ollama_chip.set_label("🧠 ❌ :4001")
+            self._ollama_chip.set_tooltip_text(f"ROXY harness unavailable: {error}")
         if self._github_chip:
             self._github_chip.set_label("🐙 --")
             self._github_chip.set_tooltip_text(f"Local status unavailable: {error}")
@@ -1100,7 +1127,19 @@ class TalkColumn(Gtk.Box):
             id=message.id,
             role=message.role,
             content=message.content,
-            timestamp=message.timestamp
+            timestamp=message.timestamp,
+            model=getattr(message, "model", ""),
+            latency_ms=getattr(message, "latency_ms", 0),
+            route_summary=(
+                f"{getattr(message, 'route_decision', {}).get('originalModel', '?')}"
+                f"->{getattr(message, 'route_decision', {}).get('selectedModel', '?')}"
+                f" rerouted={getattr(message, 'route_decision', {}).get('rerouted', '?')}"
+            ),
+            persistence_status=getattr(message, "persistence_status", ""),
+            session_id=getattr(message, "session_id", ""),
+            provider_tps=float(getattr(message, "provider_timings", {}).get("predicted_per_second", 0.0) or 0.0),
+            degraded_fallback=getattr(message, "degraded_fallback", False),
+            harness_bypassed=getattr(message, "harness_bypassed", False),
         )
         widget = ChatMessage_Widget(ui_message)
         self.chat_box.append(widget)
@@ -1192,11 +1231,12 @@ class TalkColumn(Gtk.Box):
         self._save_settings()
     
     def _on_pool_changed(self, dropdown, _pspec):
-        """Handle pool change (AUTO/ROXY)."""
-        pools = ["AUTO", "ROXY"]
+        """Handle governed model lane selection."""
+        pools = ["AUTO", "FRONTIER", "JUDGE", "LOCAL", "CLOUD"]
         idx = dropdown.get_selected()
         self._pool_mode = pools[idx] if idx < len(pools) else "AUTO"
-        print(f"[Talk] Pool: {self._pool_mode}")
+        self._chat_service.set_lane(self._pool_mode.lower())
+        print(f"[Talk] Lane: {self._pool_mode}")
         self._save_settings()
     
     def _on_speak_toggle(self, button):
