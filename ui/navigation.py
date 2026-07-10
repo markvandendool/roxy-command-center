@@ -50,6 +50,7 @@ class NavigationSidebar(Gtk.Box):
             ("gpus", "video-display-symbolic", "GPUs"),
             ("ollama", "face-smile-big-symbolic", "Ollama"),
             ("alerts", "dialog-warning-symbolic", "Alerts"),
+            ("command-kernel", "system-run-symbolic", "Command Kernel"),
             ("terminal", "utilities-terminal-symbolic", "Terminal"),
         ]
         

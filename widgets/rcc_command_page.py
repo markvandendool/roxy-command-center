@@ -27,6 +27,7 @@ import json
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from services.rcc_adapter import RCCAdapter, RCCCommandMeta, RCCRunResult
+from services.operator_kernel_client import send_action_packet
 from widgets.truth_badge import TruthBadge
 
 
@@ -62,6 +63,45 @@ PINNED_COMMANDS = [
     "roxy.models",
     "agent.agents",
 ]
+
+
+def format_codex_status(response: dict) -> dict:
+    """Flatten the Operator Kernel response into native display truth."""
+    response = response if isinstance(response, dict) else {}
+    receipt = response.get("receipt") if isinstance(response.get("receipt"), dict) else {}
+    result = response.get("result") if isinstance(response.get("result"), dict) else {}
+    if not result:
+        execution = receipt.get("execution") if isinstance(receipt.get("execution"), dict) else {}
+        result = execution.get("resultData") if isinstance(execution.get("resultData"), dict) else {}
+
+    cli = result.get("cli") if isinstance(result.get("cli"), dict) else {}
+    identity = result.get("identity") if isinstance(result.get("identity"), dict) else {}
+    mcp = result.get("mcp") if isinstance(result.get("mcp"), dict) else {}
+    capture = result.get("capture") if isinstance(result.get("capture"), dict) else {}
+    policy = receipt.get("policy") if isinstance(receipt.get("policy"), dict) else {}
+    source = receipt.get("source") if isinstance(receipt.get("source"), dict) else {}
+    blocker_codes = [
+        str(blocker.get("code"))
+        for blocker in result.get("blockers", [])
+        if isinstance(blocker, dict) and blocker.get("code")
+    ]
+
+    return {
+        "ok": response.get("ok") is True and bool(result),
+        "schemaVersion": result.get("schemaVersion") or "unavailable",
+        "status": result.get("status") or "CODEX_STATUS_UNAVAILABLE",
+        "cliVersion": cli.get("version") or "unavailable",
+        "identity": identity.get("id") or "unavailable",
+        "identityBound": identity.get("exactSurfaceBound") is True,
+        "identityMatches": identity.get("matchCount", 0),
+        "mcpInSync": mcp.get("inSync") is True,
+        "captureStatus": capture.get("status") or "unavailable",
+        "blockers": blocker_codes,
+        "receiptId": receipt.get("receiptId") or "unavailable",
+        "policyTier": policy.get("tier") or "unavailable",
+        "sourceCommit": source.get("shellVersion") or "unavailable",
+        "error": response.get("error") or receipt.get("error"),
+    }
 
 
 # ── Command Row ─────────────────────────────────────────────────────
@@ -241,6 +281,41 @@ class RCCCommandPage(Gtk.ScrolledWindow):
             legend.append(l)
         main_box.append(legend)
 
+        # Native Codex integration truth from the Operator Kernel.
+        codex_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        codex_box.add_css_class("overview-card")
+        codex_box.set_margin_bottom(8)
+        main_box.append(codex_box)
+
+        codex_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        codex_box.append(codex_header)
+
+        codex_title = Gtk.Label(label="Codex Integration")
+        codex_title.add_css_class("title-2")
+        codex_title.set_xalign(0)
+        codex_title.set_hexpand(True)
+        codex_header.append(codex_title)
+
+        self.codex_refresh_button = Gtk.Button(label="Run codex.integration.status")
+        self.codex_refresh_button.add_css_class("suggested-action")
+        self.codex_refresh_button.connect("clicked", self._refresh_codex_status)
+        codex_header.append(self.codex_refresh_button)
+
+        self.codex_summary = Gtk.Label(label="Not checked")
+        self.codex_summary.add_css_class("title-3")
+        self.codex_summary.set_xalign(0)
+        self.codex_summary.set_selectable(True)
+        codex_box.append(self.codex_summary)
+
+        self.codex_details = Gtk.Label(
+            label="Invoke the read-only Operator Kernel action to render exact native status and receipt provenance."
+        )
+        self.codex_details.add_css_class("monospace")
+        self.codex_details.set_xalign(0)
+        self.codex_details.set_wrap(True)
+        self.codex_details.set_selectable(True)
+        codex_box.append(self.codex_details)
+
         # DARK FACTORY quick strip
         factory_title = Gtk.Label(label="DARK FACTORY")
         factory_title.add_css_class("title-3")
@@ -303,6 +378,48 @@ class RCCCommandPage(Gtk.ScrolledWindow):
 
         self.receipts_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         main_box.append(self.receipts_box)
+
+    def _refresh_codex_status(self, _button=None):
+        """Run the live probes off the GTK thread and render on completion."""
+        import threading
+
+        self.codex_refresh_button.set_sensitive(False)
+        self.codex_summary.set_label("Checking Codex integration...")
+        self.codex_details.set_label("Waiting for Operator Kernel receipt")
+
+        def worker():
+            response = send_action_packet(
+                "codex.integration.status",
+                {"includeLiveProbes": True},
+                {"surfaceId": "rcc-command-kernel"},
+            )
+            GLib.idle_add(self._show_codex_status, response)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_codex_status(self, response: dict):
+        status = format_codex_status(response)
+        self.codex_summary.set_label(status["status"])
+        self.codex_summary.remove_css_class("success")
+        self.codex_summary.remove_css_class("warning")
+        self.codex_summary.add_css_class("success" if status["ok"] and not status["blockers"] else "warning")
+
+        details = [
+            f"schemaVersion: {status['schemaVersion']}",
+            f"CLI: {status['cliVersion']}",
+            f"identity: {status['identity']} | exact binding: {str(status['identityBound']).lower()} | matches: {status['identityMatches']}",
+            f"MCP parity: {str(status['mcpInSync']).lower()}",
+            f"capture: {status['captureStatus']}",
+            f"blockers: {', '.join(status['blockers']) if status['blockers'] else 'none'}",
+            f"policy tier: {status['policyTier']}",
+            f"native build: {status['sourceCommit']}",
+            f"receipt: {status['receiptId']}",
+        ]
+        if status["error"]:
+            details.append(f"error: {status['error']}")
+        self.codex_details.set_label("\n".join(details))
+        self.codex_refresh_button.set_sensitive(True)
+        return False
 
     def _load_commands(self):
         """Load and display all RCC commands."""

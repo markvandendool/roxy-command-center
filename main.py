@@ -31,6 +31,7 @@ from widgets.gpus_page import GpusPage
 from widgets.ollama_panel import OllamaPanel
 from widgets.alert_panel import AlertPanel
 from widgets.terminal_pane import TerminalPage
+from widgets.rcc_command_page import RCCCommandPage
 from services.alert_manager import get_alert_manager
 from services.ollama_control import get_ollama_control, OllamaAction, ActionResult
 
@@ -313,6 +314,14 @@ class MainWindow(Adw.ApplicationWindow):
         # Alerts page
         self.alerts_page = AlertPanel()
         self.navigation.add_page("alerts", "Alerts", self.alerts_page, "dialog-warning-symbolic")
+
+        # Existing Operator Kernel / Dark Factory surface is built on demand.
+        self.navigation.add_lazy_page(
+            "command-kernel",
+            "Command Kernel",
+            self._build_command_kernel_page,
+            "system-run-symbolic",
+        )
         
         # Terminal page
         self.terminal_page = TerminalPage()
@@ -323,6 +332,10 @@ class MainWindow(Adw.ApplicationWindow):
             on_setting_changed=self._on_setting_changed
         )
         self.navigation.add_page("settings", "Settings", self.settings_page, "emblem-system-symbolic")
+
+    def _build_command_kernel_page(self):
+        self.command_kernel_page = RCCCommandPage()
+        return self.command_kernel_page
     
     def _on_navigate(self, page_id: str):
         """Handle navigation from overview cards."""

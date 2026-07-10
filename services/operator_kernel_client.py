@@ -7,13 +7,17 @@ Never routes arbitrary shell, systemd mutation, or secrets.
 """
 
 import json
+import subprocess
 import urllib.request
 import urllib.error
 from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 OPERATOR_KERNEL_GATEWAY_URL = "http://127.0.0.1:9135/api/operator/kernel/action"
 REQUEST_TIMEOUT_S = 8.0
+APP_ROOT = Path(__file__).resolve().parents[1]
 
 # Hardcoded safe action catalog — T0/T1 non-mutating only.
 # Mirrors api/operator/kernel/action.mjs V1_ACTION_CATALOG.
@@ -55,6 +59,23 @@ def is_safe_action(action_type: str) -> bool:
     return action_type in V1_SAFE_ACTIONS
 
 
+@lru_cache(maxsize=1)
+def get_source_commit() -> str:
+    """Return the exact native RCC build commit used in action receipts."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=APP_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            check=True,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return "unknown"
+
+
 def build_action_packet(
     action_type: str,
     payload: Optional[Dict[str, Any]] = None,
@@ -66,7 +87,7 @@ def build_action_packet(
     shell = {
         "platform": "hardware",
         "deviceId": "roxy-native-gtk4",
-        "shellVersion": "2020e4fe71ec",
+        "shellVersion": get_source_commit(),
         "surfaceId": "rcc-main",
     }
     if shell_meta:
