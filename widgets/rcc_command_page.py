@@ -23,6 +23,7 @@ from gi.repository import Gtk, Adw, GLib, Pango
 from typing import Optional, Dict, Any
 from pathlib import Path
 import json
+import threading
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -241,6 +242,9 @@ class RCCCommandPage(Gtk.ScrolledWindow):
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.adapter = RCCAdapter()
         self._rows: Dict[str, RCCCommandRow] = {}
+        self._command_load_generation = 0
+        self.command_catalog_state = "idle"
+        self.command_catalog_message: Optional[Gtk.Label] = None
         self._build_ui()
         self._load_commands()
 
@@ -267,10 +271,10 @@ class RCCCommandPage(Gtk.ScrolledWindow):
         self.status_label.add_css_class("caption")
         header.append(self.status_label)
 
-        refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        refresh.set_tooltip_text("Refresh command list")
-        refresh.connect("clicked", lambda *_: self._load_commands())
-        header.append(refresh)
+        self.command_refresh_button = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
+        self.command_refresh_button.set_tooltip_text("Refresh command list")
+        self.command_refresh_button.connect("clicked", lambda *_: self._load_commands())
+        header.append(self.command_refresh_button)
 
         # Legend
         legend = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
@@ -422,31 +426,72 @@ class RCCCommandPage(Gtk.ScrolledWindow):
         return False
 
     def _load_commands(self):
-        """Load and display all RCC commands."""
-        # Clear existing
-        while self.commands_box.get_first_child():
-            self.commands_box.remove(self.commands_box.get_first_child())
-        while self.results_box.get_first_child():
-            self.results_box.remove(self.results_box.get_first_child())
+        """Load the RCC catalog off the GTK thread and render its state."""
+        self._command_load_generation += 1
+        generation = self._command_load_generation
+        self._rows.clear()
+        self._clear_box(self.commands_box)
+        self._clear_box(self.results_box)
+        self._clear_box(self.quick_box)
+        self._set_command_catalog_state("loading", "Loading RCC command catalog...")
 
-        # Check adapter health
-        status = self.adapter.status()
-        if not status["rcc_cli_exists"]:
-            self.status_label.set_text("❌ RCC CLI not found")
-            err = Gtk.Label(label="RCC CLI not found. Is the SSOT repo mounted?")
-            err.add_css_class("error")
-            self.commands_box.append(err)
-            return
+        def worker():
+            try:
+                status = self.adapter.status()
+                if not status.get("rcc_cli_exists"):
+                    raise FileNotFoundError("RCC CLI not found. Is the SSOT repo mounted?")
+                commands = self.adapter.list_commands()
+                GLib.idle_add(self._show_command_catalog, generation, commands, None)
+            except Exception as exc:
+                GLib.idle_add(self._show_command_catalog, generation, [], str(exc))
 
-        self.status_label.set_text("✅ RCC connected")
+        threading.Thread(target=worker, daemon=True, name="rcc-command-catalog").start()
 
-        commands = self.adapter.list_commands()
+    @staticmethod
+    def _clear_box(box: Gtk.Box):
+        while box.get_first_child():
+            box.remove(box.get_first_child())
+
+    def _set_command_catalog_state(self, state: str, message: str):
+        """Expose catalog progress without making the page appear empty."""
+        self.command_catalog_state = state
+        self.status_label.set_text(message)
+        self.command_refresh_button.set_sensitive(state != "loading")
+
+        self.command_catalog_message = None
+        if state in ("loading", "error"):
+            label = Gtk.Label(label=message)
+            label.set_xalign(0)
+            label.set_wrap(True)
+            label.add_css_class("error" if state == "error" else "dim-label")
+            self.commands_box.append(label)
+            self.command_catalog_message = label
+
+    def _show_command_catalog(
+        self,
+        generation: int,
+        commands: list[RCCCommandMeta],
+        error: Optional[str],
+    ):
+        """Render a worker result on GTK, ignoring obsolete refreshes."""
+        if generation != self._command_load_generation:
+            return False
+
+        self._clear_box(self.commands_box)
+        self.command_catalog_message = None
+
+        if error:
+            self._set_command_catalog_state("error", f"RCC command catalog unavailable: {error}")
+            return False
+
         if not commands:
-            empty = Gtk.Label(label="No RCC commands found. Run rcc --list to verify.")
-            empty.add_css_class("dim-label")
-            self.commands_box.append(empty)
-            return
+            self._set_command_catalog_state(
+                "error",
+                "RCC command catalog returned no commands. The CLI may be unavailable or timed out; run rcc --list to verify.",
+            )
+            return False
 
+        self._set_command_catalog_state("ready", f"RCC connected: {len(commands)} commands")
         self._build_quick_commands(commands)
 
         for meta in commands:
@@ -454,10 +499,11 @@ class RCCCommandPage(Gtk.ScrolledWindow):
             self.commands_box.append(row)
             self._rows[meta.id] = row
 
-        # Also load receipts and route doctor
+        # These operations are either local receipt reads or already asynchronous.
         self._load_receipts()
         self._refresh_factory_status()
         self._refresh_route_doctor()
+        return False
 
     def _build_quick_commands(self, commands: list[RCCCommandMeta]):
         """Build pinned DARK FACTORY command buttons."""
@@ -475,8 +521,6 @@ class RCCCommandPage(Gtk.ScrolledWindow):
 
     def _refresh_route_doctor(self):
         """Run factory.routes in the background and render route doctor rows."""
-        import threading
-
         def worker():
             result = self.adapter.run("factory.routes", receipt=True)
             GLib.idle_add(self._show_route_doctor, result)
@@ -589,8 +633,6 @@ class RCCCommandPage(Gtk.ScrolledWindow):
 
     def _refresh_factory_status(self):
         """Run factory.status in the background and summarize readiness."""
-        import threading
-
         def worker():
             result = self.adapter.run("factory.status", receipt=True)
             GLib.idle_add(self._show_factory_status, result)
@@ -614,7 +656,6 @@ class RCCCommandPage(Gtk.ScrolledWindow):
             self.factory_status.set_text(f"Running {command_id}...")
 
         # Run in a thread to avoid blocking UI
-        import threading
         def worker():
             result = self.adapter.run(command_id, dry_run=dry_run, receipt=True)
             GLib.idle_add(self._show_result, command_id, result)
