@@ -15,6 +15,7 @@ import os
 import json
 import signal
 import faulthandler
+import traceback
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
@@ -37,6 +38,27 @@ from services.ollama_control import get_ollama_control, OllamaAction, ActionResu
 
 APP_ID = "org.roxy.CommandCenter"
 CSS_PATH = Path(__file__).parent / "styles" / "custom.css"
+
+
+def run_surface_update(surface_id: str, callback, data: dict, on_error=None) -> bool:
+    """Run one page update without allowing it to starve later surfaces."""
+    try:
+        callback(data)
+        return True
+    except Exception as exc:
+        error = {
+            "code": "RCC_SURFACE_UPDATE_FAILED",
+            "surfaceId": surface_id,
+            "evaluatedExpression": f"{surface_id}.update(data)",
+            "exceptionName": type(exc).__name__,
+            "message": str(exc),
+            "stack": traceback.format_exc(),
+            "timestamp": datetime.now().isoformat(),
+        }
+        print(json.dumps(error, sort_keys=True))
+        if on_error:
+            on_error(error)
+        return False
 
 
 class RoxyCommandCenter(Adw.Application):
@@ -236,6 +258,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Data
         self._daemon_client = DaemonClient()
         self._current_data: dict = {}
+        self._surface_update_errors: dict = {}
         self._poll_source_id: Optional[int] = None
         print("[MainWindow] Data structures initialized")
         
@@ -432,20 +455,24 @@ class MainWindow(Adw.ApplicationWindow):
     
     def _update_ui(self, data: dict):
         """Update all UI components with new data."""
-        # Home Console
-        self.home_page.update(data)
-        
-        # Overview
-        self.overview_page.update(data)
-        
-        # Services
-        self.services_page.update(data)
-        
-        # GPUs
-        self.gpus_page.update(data)
-        
-        # Ollama
-        self.ollama_page.update(data)
+        surfaces = (
+            ("home", self.home_page.update),
+            ("overview", self.overview_page.update),
+            ("services", self.services_page.update),
+            ("gpus", self.gpus_page.update),
+            ("ollama", self.ollama_page.update),
+        )
+        for surface_id, callback in surfaces:
+            run_surface_update(surface_id, callback, data, self._on_surface_update_error)
+
+    def _on_surface_update_error(self, error: dict):
+        """Retain machine-readable page failure evidence and expose it in pixels."""
+        self._surface_update_errors[error["surfaceId"]] = error
+        self._show_toast(
+            f"{error['code']} {error['surfaceId']}: "
+            f"{error['exceptionName']}: {error['message']}",
+            timeout=8,
+        )
     
     def refresh(self):
         """Manual refresh."""
