@@ -26,7 +26,7 @@ LAUNCHER_PATH = Path.home() / ".local" / "bin" / "roxy-command-center"
 RUNTIME_DIR = Path.home() / ".cache" / "roxy-command-center"
 RECEIPT_DIR = RUNTIME_DIR / "launch-receipts"
 
-BACKEND_TARGETS = {
+DEFAULT_BACKEND_TARGETS = {
     "operatorKernel": "http://127.0.0.1:9135/health",
     "bridge": "http://127.0.0.1:8787/health",
     "ollama": "http://127.0.0.1:11434/api/tags",
@@ -34,6 +34,23 @@ BACKEND_TARGETS = {
     "ada": "http://127.0.0.1:8085/health",
     "testingBay": "http://192.168.3.3:9311/health",
 }
+
+BACKEND_ENV_VARS = {
+    "operatorKernel": "RCC_OPERATOR_KERNEL_HEALTH_URL",
+    "bridge": "RCC_BRIDGE_HEALTH_URL",
+    "ollama": "RCC_OLLAMA_HEALTH_URL",
+    "liteLLM": "RCC_LITELLM_HEALTH_URL",
+    "ada": "RCC_ADA_HEALTH_URL",
+    "testingBay": "RCC_TESTING_BAY_HEALTH_URL",
+}
+
+
+def get_backend_targets() -> dict[str, str]:
+    """Resolve probe URLs at call time so failures can be isolated safely."""
+    return {
+        name: os.getenv(BACKEND_ENV_VARS[name], default_url)
+        for name, default_url in DEFAULT_BACKEND_TARGETS.items()
+    }
 
 
 def run(command: list[str], timeout: float = 8.0) -> dict:
@@ -200,8 +217,9 @@ def probe_backend(name: str, url: str, timeout: float = 1.5) -> tuple[str, dict]
 
 
 def get_backend_statuses() -> dict:
-    with ThreadPoolExecutor(max_workers=len(BACKEND_TARGETS)) as executor:
-        rows = executor.map(lambda item: probe_backend(*item), BACKEND_TARGETS.items())
+    targets = get_backend_targets()
+    with ThreadPoolExecutor(max_workers=len(targets)) as executor:
+        rows = executor.map(lambda item: probe_backend(*item), targets.items())
         return dict(rows)
 
 

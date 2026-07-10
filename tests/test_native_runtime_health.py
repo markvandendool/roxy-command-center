@@ -10,7 +10,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import tools.runtime_check as runtime_check
 
-from tools.runtime_check import APP_ROOT, classify_native_health, is_expected_primary
+from tools.runtime_check import (
+    APP_ROOT,
+    BACKEND_ENV_VARS,
+    DEFAULT_BACKEND_TARGETS,
+    classify_native_health,
+    get_backend_targets,
+    is_expected_primary,
+)
 
 
 def base_report():
@@ -110,10 +117,31 @@ def test_prepare_launch_is_fail_closed_and_exact_pid_scoped():
         terminate.assert_called_once_with(4242)
 
 
+def test_each_backend_can_be_isolated_with_a_dead_endpoint():
+    dead_url = "http://127.0.0.1:9/health"
+    for backend, env_name in BACKEND_ENV_VARS.items():
+        with patch.dict(os.environ, {env_name: dead_url}, clear=False):
+            targets = get_backend_targets()
+            assert targets[backend] == dead_url
+            for other_backend, default_url in DEFAULT_BACKEND_TARGETS.items():
+                if other_backend != backend:
+                    assert targets[other_backend] == default_url
+
+            report = base_report()
+            report["backendStatuses"] = {
+                name: {"ok": name != backend, "url": url}
+                for name, url in targets.items()
+            }
+            assert report["processAlive"]
+            assert report["visibleWindowCount"] == 1
+            assert classify_native_health(report) == "RCC_BACKEND_DEGRADED"
+
+
 def main() -> int:
     test_named_health_states()
     test_primary_identity_requires_exact_uid_cwd_executable_and_main()
     test_prepare_launch_is_fail_closed_and_exact_pid_scoped()
+    test_each_backend_can_be_isolated_with_a_dead_endpoint()
     print("RCC_NATIVE_RUNTIME_HEALTH_PASS")
     return 0
 
