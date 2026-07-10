@@ -1,18 +1,34 @@
-#!/bin/bash
-# ROXY Command Center Launcher
-# Ensures single instance and proper environment
+#!/usr/bin/env bash
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNTIME_DIR="$HOME/.cache/roxy-command-center"
+LOG_FILE="$RUNTIME_DIR/run.log"
+
 cd "$SCRIPT_DIR"
+mkdir -p "$RUNTIME_DIR"
 
-# Kill existing instance if running
-pkill -f "python3 main.py" 2>/dev/null
+export DISPLAY="${DISPLAY:-:1}"
+export XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/gdm/Xauthority}"
+export GDK_BACKEND="${GDK_BACKEND:-x11}"
+export OLLAMA_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
 
-# Small delay for cleanup
-sleep 0.3
+set +e
+PREPARE_OUTPUT="$(python3 tools/runtime_check.py prepare-launch 2>&1)"
+PREPARE_STATUS=$?
+set -e
+printf '%s\n' "$PREPARE_OUTPUT" | tee -a "$LOG_FILE"
 
-# Launch with proper environment
-# Use X11 backend for GTK4 compatibility on Wayland compositors
-# Use venv python to ensure PyGObject access via system site-packages
-export GDK_BACKEND=x11
-exec "$HOME/.roxy/venv/bin/python" main.py "$@"
+case "$PREPARE_STATUS" in
+    0)
+        ;;
+    10)
+        exit 0
+        ;;
+    *)
+        printf 'RCC_LAUNCH_REFUSED status=%s\n' "$PREPARE_STATUS" | tee -a "$LOG_FILE" >&2
+        exit "$PREPARE_STATUS"
+        ;;
+esac
+
+exec python3 -X faulthandler -u main.py "$@" >>"$LOG_FILE" 2>&1

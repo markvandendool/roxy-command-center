@@ -10,4 +10,4 @@ echo
 ./tools/runtime_check.py
 echo
 echo "Runtime check passed. Starting GTK app in foreground..."
-exec python3 main.py
+exec ./launch.sh

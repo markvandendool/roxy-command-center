@@ -57,6 +57,7 @@ class ReleaseCaptainPushPacket:
     reason: str = "V5 Agent Operating Console production delivery"
     risk_level: str = "low"
     rollback_commit: str = ""
+    remote_head: str = ""
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -121,7 +122,8 @@ class ReleaseCaptainPushPacket:
             f"- **Rollback commit:** `{self.rollback_commit}`",
             f"```bash",
             f"cd {self.repo_path}",
-            f"git push {self.remote_name} {self.rollback_commit}:{self.branch} --force-with-lease",
+            f"git revert --no-edit {self.remote_head}..{self.commit_hash}",
+            f"AGENT_ROLE=ReleaseCaptain AGENT_PACKET=RCC-NATIVE-PRODUCTION-DURABILITY-V1 AGENT_ALLOW_MAIN_PUSH=1 git push {self.remote_name} {self.branch}",
             f"```",
             "",
             "## Authority",
@@ -162,7 +164,7 @@ def generate_packet(repo_path: str = "/mnt/work/roxy-core/apps/roxy-command-cent
                 packet.commit_message = parts[4]
         
         result = subprocess.run(
-            ["git", "diff", "--stat", "HEAD~1..HEAD"],
+            ["git", "diff", "--stat", "origin/main..HEAD"],
             cwd=repo_path, capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
@@ -197,19 +199,25 @@ def generate_packet(repo_path: str = "/mnt/work/roxy-core/apps/roxy-command-cent
         if result.returncode == 0:
             packet.remote_url = result.stdout.strip()
         
-        # Rollback commit (parent of current)
+        # Remote head is the publication base and rollback boundary.
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD~1"],
+            ["git", "rev-parse", "origin/main"],
             cwd=repo_path, capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
-            packet.rollback_commit = result.stdout.strip()[:12]
+            packet.remote_head = result.stdout.strip()
+            packet.rollback_commit = packet.remote_head[:12]
         
     except Exception as e:
         print(f"[ReleaseCaptain] Error reading git state: {e}")
     
     # Build push command
-    packet.push_command = f"git push {packet.remote_name} {packet.branch}"
+    packet.push_command = (
+        "AGENT_ROLE=ReleaseCaptain "
+        "AGENT_PACKET=RCC-NATIVE-PRODUCTION-DURABILITY-V1 "
+        "AGENT_ALLOW_MAIN_PUSH=1 "
+        f"git push {packet.remote_name} {packet.branch}"
+    )
     
     # Verification steps
     packet.pre_push_verification = [
