@@ -33,6 +33,7 @@ from services.operator_kernel_client import get_source_commit
 
 ROXY_CHAT_PROXY_URL = os.getenv("ROXY_CHAT_PROXY_URL", "http://127.0.0.1:4001").rstrip("/")
 DEFAULT_MODEL = os.getenv("ROXY_COMMAND_CENTER_MODEL", "roxy-coder-frontier")
+DEFAULT_HEALTH_TIMEOUT_SECONDS = 3
 CHAT_RECEIPT_DIR = Path.home() / ".cache" / "roxy-command-center" / "chat-receipts"
 LANE_MODELS = {
     "auto": "roxy-coder-frontier",
@@ -41,6 +42,14 @@ LANE_MODELS = {
     "local": "roxy-chat",
     "cloud": "roxy-smart",
 }
+
+
+def _bounded_health_timeout(value: Any) -> int:
+    try:
+        timeout = int(value)
+    except (TypeError, ValueError):
+        timeout = DEFAULT_HEALTH_TIMEOUT_SECONDS
+    return min(10, max(1, timeout))
 
 
 def build_harness_payload(
@@ -214,8 +223,13 @@ class ChatService:
     - Render UI
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        proxy_base_url: Optional[str] = None,
+        health_timeout_seconds: Optional[int] = None,
+    ):
         self._session: Optional[ChatSession] = None
+        # Generation can legitimately be slow, but startup health must fail fast.
         self._soup_session = Soup.Session()
         try:
             self._soup_session.set_property("timeout", 120)
@@ -226,13 +240,28 @@ class ChatService:
                 pass
         except Exception:
             pass
+        self._health_timeout_seconds = _bounded_health_timeout(
+            health_timeout_seconds
+            if health_timeout_seconds is not None
+            else os.getenv("ROXY_CHAT_HEALTH_TIMEOUT_SECONDS")
+        )
+        self._health_session = Soup.Session()
+        try:
+            self._health_session.set_property("timeout", self._health_timeout_seconds)
+        except TypeError:
+            try:
+                self._health_session.props.timeout = self._health_timeout_seconds
+            except Exception:
+                pass
+        except Exception:
+            pass
         self._status = ConnectionStatus.DISCONNECTED
         self._timeout_handles: List[int] = []
         self._pending_request_active = False
         self._pending_message: Optional[Soup.Message] = None
         self._timeout_error_triggered = False
         self._last_error_message: Optional[str] = None
-        self._proxy_base_url: str = ROXY_CHAT_PROXY_URL
+        self._proxy_base_url = (proxy_base_url or ROXY_CHAT_PROXY_URL).rstrip("/")
         self._selected_lane: str = "auto"
         self._requested_model: str = DEFAULT_MODEL
         
@@ -381,6 +410,14 @@ class ChatService:
     def latency_ms(self) -> int:
         return self._last_latency_ms
 
+    @property
+    def proxy_base_url(self) -> str:
+        return self._proxy_base_url
+
+    @property
+    def health_timeout_seconds(self) -> int:
+        return self._health_timeout_seconds
+
     def set_lane(self, lane: str):
         lane = str(lane or "auto").lower()
         self._selected_lane = lane if lane in LANE_MODELS else "auto"
@@ -397,20 +434,21 @@ class ChatService:
     # Internal: canonical ROXY harness communication
     # -------------------------------------------------------------------------
     
-    def _ping_roxy_core(self, retry_count: int = 0):
-        """Test connection to roxy-chat-proxy via /health.
-        
-        Args:
-            retry_count: Current retry attempt (max 2 retries on timeout)
-        """
+    def _ping_roxy_core(self):
+        """Probe the harness once using the short startup-health timeout."""
         uri = f"{self._proxy_base_url}/health"
         message = Soup.Message.new("GET", uri)
 
-        self._soup_session.send_async(message, GLib.PRIORITY_DEFAULT, None, self._on_ping_response, retry_count)
+        self._health_session.send_async(
+            message,
+            GLib.PRIORITY_DEFAULT,
+            None,
+            self._on_ping_response,
+            None,
+        )
     
-    def _on_ping_response(self, session, result, retry_count):
+    def _on_ping_response(self, session, result, _user_data):
         """Handle ping response from /health."""
-        retry_count = retry_count if isinstance(retry_count, int) else 0
         try:
             input_stream = session.send_finish(result)
             
@@ -457,15 +495,6 @@ class ChatService:
                 self._set_status(ConnectionStatus.ERROR, "ROXY harness health returned no data")
                 
         except Exception as e:
-            error_str = str(e)
-            is_timeout = "timed out" in error_str.lower() or "timeout" in error_str.lower()
-            
-            # Retry up to 2 times on timeout errors
-            if is_timeout and retry_count < 2:
-                print(f"[ChatService] Ping timeout, retry {retry_count + 1}/2...")
-                GLib.timeout_add_seconds(1, lambda: self._ping_roxy_core(retry_count + 1) or False)
-                return
-            
             print(f"[ChatService] Ping failed: {e}")
             self._set_status(ConnectionStatus.ERROR, f"Connection failed: {e}")
     

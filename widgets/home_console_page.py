@@ -594,7 +594,7 @@ class ChatMessage_Widget(Gtk.Box):
 class TalkColumn(Gtk.Box):
     """Center column: governed Roxy conversation through the harness."""
     
-    def __init__(self):
+    def __init__(self, chat_service: Optional[ChatService] = None):
         print("[TalkColumn] ========== INIT BEGIN ==========" )
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add_css_class("talk-column")
@@ -611,8 +611,10 @@ class TalkColumn(Gtk.Box):
         
         # Services
         print("[TalkColumn] Getting services...")
-        self._chat_service = get_chat_service()
-        self._voice_service = get_voice_service()
+        self._chat_service = chat_service or get_chat_service()
+        self._voice_service = (
+            VoiceService(self._chat_service) if chat_service is not None else get_voice_service()
+        )
         print("[TalkColumn] Services acquired")
         
         # UI references
@@ -1014,13 +1016,18 @@ class TalkColumn(Gtk.Box):
             try:
                 import urllib.request
                 import json
-                req = urllib.request.Request("http://127.0.0.1:4001/health")
+                proxy_base_url = self._chat_service.proxy_base_url
+                req = urllib.request.Request(f"{proxy_base_url}/health")
                 req.add_header("User-Agent", "roxy-command-center/truth-panel")
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with urllib.request.urlopen(
+                    req,
+                    timeout=self._chat_service.health_timeout_seconds,
+                ) as resp:
                     payload = json.loads(resp.read().decode())
                     data = {
                         "server_time_iso": datetime.now().isoformat(),
                         "harness": payload,
+                        "proxy_base_url": proxy_base_url,
                     }
                     GLib.idle_add(self._update_truth_panel, data)
             except Exception as e:
@@ -1056,11 +1063,16 @@ class TalkColumn(Gtk.Box):
             harness = data.get("harness", {})
             proxy_ok = harness.get("ok") is True
             upstream_ok = harness.get("upstreamReachable") is True
+            proxy_base_url = data.get(
+                "proxy_base_url",
+                self._chat_service.proxy_base_url,
+            )
+            proxy_label = proxy_base_url.split("://", 1)[-1]
             self._ollama_chip.set_label(
-                f"🧠 {'ok' if proxy_ok and upstream_ok else 'degraded'} :4001"
+                f"🧠 {'ok' if proxy_ok and upstream_ok else 'degraded'} {proxy_label}"
             )
             self._ollama_chip.set_tooltip_text(
-                f"ROXY harness: http://127.0.0.1:4001\n"
+                f"ROXY harness: {proxy_base_url}\n"
                 f"proxy: {proxy_ok}\nupstream: {upstream_ok}\n"
                 f"persistence: {harness.get('storage', {}).get('status', 'unknown')}"
             )
@@ -1107,8 +1119,12 @@ class TalkColumn(Gtk.Box):
         if self._git_chip:
             self._git_chip.set_label("🔀 --")
         if self._ollama_chip:
-            self._ollama_chip.set_label("🧠 ❌ :4001")
-            self._ollama_chip.set_tooltip_text(f"ROXY harness unavailable: {error}")
+            proxy_base_url = self._chat_service.proxy_base_url
+            proxy_label = proxy_base_url.split("://", 1)[-1]
+            self._ollama_chip.set_label(f"🧠 ❌ {proxy_label}")
+            self._ollama_chip.set_tooltip_text(
+                f"ROXY harness unavailable at {proxy_base_url}: {error}"
+            )
         if self._github_chip:
             self._github_chip.set_label("🐙 --")
             self._github_chip.set_tooltip_text(f"Local status unavailable: {error}")

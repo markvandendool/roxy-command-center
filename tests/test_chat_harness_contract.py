@@ -123,6 +123,44 @@ def test_lane_selection_and_native_provenance_widget():
     assert widget.get_first_child() is not None
 
 
+def test_health_timeout_is_bounded_without_shortening_generation_timeout():
+    short = ChatService(health_timeout_seconds=0)
+    long = ChatService(health_timeout_seconds=999)
+    assert short.health_timeout_seconds == 1
+    assert long.health_timeout_seconds == 10
+    assert short._soup_session.get_property("timeout") == 120
+
+
+def test_dead_proxy_keeps_talk_column_usable_and_shows_error():
+    service = ChatService(
+        proxy_base_url="http://127.0.0.1:9",
+        health_timeout_seconds=1,
+    )
+    column = TalkColumn(chat_service=service)
+    context = GLib.MainContext.default()
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        while context.pending():
+            context.iteration(False)
+        if (
+            service.status == ConnectionStatus.ERROR
+            and "❌" in column._ollama_chip.get_label()
+        ):
+            break
+        time.sleep(0.01)
+
+    assert service.proxy_base_url == "http://127.0.0.1:9"
+    assert service.health_timeout_seconds == 1
+    assert service.status == ConnectionStatus.ERROR
+    assert "Error" in column._status_chip.get_label()
+    assert column._status_label.get_label()
+    assert "127.0.0.1:9" in column._ollama_chip.get_label()
+    assert "http://127.0.0.1:9" in column._ollama_chip.get_tooltip_text()
+    assert column.entry.get_sensitive()
+    column.entry.set_text("dead harness does not disable native controls")
+    assert column.entry.get_text() == "dead harness does not disable native controls"
+
+
 def run_live_contract() -> dict:
     marker = "ADA_NATIVE_LIVE_CONTRACT_OK"
     payload = build_harness_payload(
@@ -165,6 +203,8 @@ def main() -> int:
     test_valid_route_is_accepted()
     test_false_green_responses_are_rejected()
     test_lane_selection_and_native_provenance_widget()
+    test_health_timeout_is_bounded_without_shortening_generation_timeout()
+    test_dead_proxy_keeps_talk_column_usable_and_shows_error()
     if "--live" in sys.argv:
         live = run_live_contract()
         print(
