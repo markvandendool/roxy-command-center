@@ -117,6 +117,7 @@ def test_lane_selection_and_native_provenance_widget():
             persistence_status="live",
             session_id="roxy_contract_123",
             provider_tps=25.0,
+            receipt_path="/tmp/rcc-chat-contract.json",
         )
     )
     assert widget.get_first_child() is not None

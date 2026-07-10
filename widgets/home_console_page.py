@@ -107,6 +107,7 @@ class ChatMessage:
     provider_tps: float = 0.0
     degraded_fallback: bool = False
     harness_bypassed: bool = False
+    receipt_path: str = ""
 
 
 # =============================================================================
@@ -577,8 +578,17 @@ class ChatMessage_Widget(Gtk.Box):
                 provenance.set_xalign(0)
                 provenance.set_wrap(True)
                 provenance.set_selectable(True)
-                provenance.set_tooltip_text(f"session={message.session_id}")
+                provenance.set_tooltip_text(f"receipt={message.receipt_path}")
                 bubble.append(provenance)
+
+                receipt = Gtk.Label(label=f"receipt={message.receipt_path}")
+                receipt.add_css_class("caption")
+                receipt.add_css_class("dim-label")
+                receipt.add_css_class("monospace")
+                receipt.set_xalign(0)
+                receipt.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+                receipt.set_selectable(True)
+                bubble.append(receipt)
 
 
 class TalkColumn(Gtk.Box):
@@ -1140,6 +1150,7 @@ class TalkColumn(Gtk.Box):
             provider_tps=float(getattr(message, "provider_timings", {}).get("predicted_per_second", 0.0) or 0.0),
             degraded_fallback=getattr(message, "degraded_fallback", False),
             harness_bypassed=getattr(message, "harness_bypassed", False),
+            receipt_path=getattr(message, "receipt_path", ""),
         )
         widget = ChatMessage_Widget(ui_message)
         self.chat_box.append(widget)

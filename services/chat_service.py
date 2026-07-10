@@ -24,6 +24,8 @@ from datetime import datetime
 from enum import Enum
 import uuid
 
+from services.operator_kernel_client import get_source_commit
+
 
 # =============================================================================
 # CONFIGURATION
@@ -31,6 +33,7 @@ import uuid
 
 ROXY_CHAT_PROXY_URL = os.getenv("ROXY_CHAT_PROXY_URL", "http://127.0.0.1:4001").rstrip("/")
 DEFAULT_MODEL = os.getenv("ROXY_COMMAND_CENTER_MODEL", "roxy-coder-frontier")
+CHAT_RECEIPT_DIR = Path.home() / ".cache" / "roxy-command-center" / "chat-receipts"
 LANE_MODELS = {
     "auto": "roxy-coder-frontier",
     "frontier": "roxy-coder-frontier",
@@ -122,6 +125,18 @@ def validate_harness_response(data: dict, expected_model: str) -> dict:
     }
 
 
+def write_chat_receipt(receipt: dict) -> Path:
+    """Persist one validated native response atomically with private permissions."""
+    CHAT_RECEIPT_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S.%f")
+    path = CHAT_RECEIPT_DIR / f"rcc-chat-{stamp}.json"
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    os.chmod(temporary, 0o600)
+    temporary.replace(path)
+    return path
+
+
 # =============================================================================
 # DATA MODELS
 # =============================================================================
@@ -164,6 +179,7 @@ class ChatMessage:
     provider_timings: Dict[str, Any] = field(default_factory=dict)
     degraded_fallback: bool = False
     harness_bypassed: bool = False
+    receipt_path: str = ""
 
 
 @dataclass
@@ -497,6 +513,7 @@ class ChatService:
             "lane": self._selected_lane,
             "routeMode": routing_mode or "AUTO",
             "pool": pool or self._selected_lane.upper(),
+            "prompt": text,
         }
         self._pending_request_active = True
         self._timeout_error_triggered = False
@@ -631,6 +648,32 @@ class ChatService:
                 self._session.roxy_session_id = validated["sessionId"]
 
             route = validated["routeDecision"]
+            chat_receipt = {
+                "schemaVersion": "rcc-native-chat-receipt.v1",
+                "generatedAt": datetime.now().isoformat(),
+                "sourceCommit": get_source_commit(),
+                "integrity": {"ok": True, "failures": []},
+                "request": {
+                    "prompt": request_context.get("prompt"),
+                    "model": expected_model,
+                    "lane": request_context.get("lane"),
+                    "routeMode": request_context.get("routeMode"),
+                },
+                "response": {
+                    "content": validated["content"],
+                    "model": validated["model"],
+                    "sessionId": validated["sessionId"],
+                    "persistenceStatus": validated["persistenceStatus"],
+                    "memoryStatus": validated["memoryStatus"],
+                    "routeDecision": route,
+                    "clientLatencyMs": self._last_latency_ms,
+                    "providerTimings": validated["timings"],
+                    "usage": validated["usage"],
+                    "degradedFallback": False,
+                    "harnessBypassDetected": False,
+                },
+            }
+            receipt_path = write_chat_receipt(chat_receipt)
             meta = {
                 "mode": "ROXY",
                 "pool": request_context.get("pool", "AUTO"),
@@ -651,6 +694,7 @@ class ChatService:
                 "backend_timings": validated["timings"],
                 "provider_executed": validated["providerExecuted"],
                 "usage": validated["usage"],
+                "receipt_path": str(receipt_path),
             }
             self._last_execution_meta = meta
             if self._on_meta_update:
@@ -670,6 +714,7 @@ class ChatService:
                 provider_timings=validated["timings"],
                 degraded_fallback=False,
                 harness_bypassed=False,
+                receipt_path=str(receipt_path),
             )
             if self._session:
                 self._session.messages.append(assistant_msg)
