@@ -76,7 +76,7 @@ class OverviewCard(Gtk.Box):
         
         # Sparkline
         if show_sparkline:
-            self._sparkline = SparklineWidget(history_size=30)
+            self._sparkline = SparklineWidget()
             self._sparkline.set_margin_top(8)
             self.append(self._sparkline)
     
