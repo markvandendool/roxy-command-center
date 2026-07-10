@@ -21,6 +21,7 @@ V1_SAFE_ACTIONS = {
     "kernel.state.get",
     "kernel.sources.health",
     "kernel.capabilities.list",
+    "codex.integration.status",
     "kernel.receipts.list",
     "bridge.status.get",
     "agent.deck.status.get",
