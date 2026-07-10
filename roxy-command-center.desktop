@@ -6,8 +6,13 @@ Exec=/home/mark/.local/bin/roxy-command-center
 Icon=roxy-command-center
 Terminal=false
 Type=Application
-Categories=System;Monitor;Utility;
+Categories=System;Monitor;
 Keywords=roxy;gpu;ollama;monitor;control;ai;
 StartupNotify=true
 StartupWMClass=main.py
 X-GNOME-UsesNotifications=true
+Actions=GWD;
+
+[Desktop Action GWD]
+Name=Open on GWD Monitor
+Exec=/home/mark/.local/bin/roxy-command-center-gwd

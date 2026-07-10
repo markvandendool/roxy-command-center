@@ -26,10 +26,14 @@ GTK4/Libadwaita desktop application for ROXY AI workstation monitoring and contr
 # Install dependencies (Debian/Ubuntu)
 sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
 
-# Clone and run
+# Clone and run through the exact-instance launcher
 git clone https://github.com/markvandendool/roxy-command-center.git
 cd roxy-command-center
-python3 main.py
+./launch.sh
+
+# Install the same tracked launcher for GNOME and autostart
+./scripts/install-native-launcher.sh
+./scripts/install-native-launcher.sh --check
 ```
 
 ## Structure
@@ -55,17 +59,18 @@ roxy-command-center/
 ## Usage
 
 ```bash
-# Launch
-python3 main.py
-
-# Or use the launcher
+# Launch or present the one verified native instance
 ./launch.sh
+
+# Emit exact D-Bus/PID/window/backend health
+python3 tools/runtime_check.py native-health
 ```
 
-### Review Safety
-This adaptation is not installed as a production authority layer. Service
-mutations and system sleep are disabled. Ollama is mapped to the current single
-service on `127.0.0.1:11434`.
+### Safety
+The native launcher is installed as the process and presentation authority. It
+never broad-kills processes: stale recovery requires the exact D-Bus owner PID,
+matching UID, executable, canonical cwd, and zero visible native windows before
+bounded termination. Service mutations and system sleep remain disabled.
 
 ## License
 
