@@ -1,0 +1,134 @@
+{
+  "schemaVersion": "rcc-native-degraded-matrix.v1",
+  "generatedAt": "2026-07-10T21:29:17Z",
+  "deadEndpoint": "http://127.0.0.1:9/health",
+  "acceptance": {
+    "allCasesDegraded": true,
+    "allProcessesAlive": true,
+    "allOneVisibleWindow": true,
+    "allSelectedBackendsFailed": true,
+    "allFivePeersHealthy": true
+  },
+  "cases": [
+    {
+      "backend": "ada",
+      "overrideEnv": "RCC_ADA_HEALTH_URL",
+      "status": "RCC_BACKEND_DEGRADED",
+      "ok": true,
+      "processAlive": true,
+      "sourceCommit": "4dd10455499e7cc50f62dab802b53401e2168bc2",
+      "sourceCommitVerified": true,
+      "sourceAligned": true,
+      "visibleWindowCount": 1,
+      "windowTitle": "Roxy Command Center",
+      "selectedBackend": {
+        "error": "<urlopen error [Errno 111] Connection refused>",
+        "ok": false,
+        "reachable": false,
+        "status": null,
+        "url": "http://127.0.0.1:9/health"
+      },
+      "healthyPeerCount": 5
+    },
+    {
+      "backend": "bridge",
+      "overrideEnv": "RCC_BRIDGE_HEALTH_URL",
+      "status": "RCC_BACKEND_DEGRADED",
+      "ok": true,
+      "processAlive": true,
+      "sourceCommit": "4dd10455499e7cc50f62dab802b53401e2168bc2",
+      "sourceCommitVerified": true,
+      "sourceAligned": true,
+      "visibleWindowCount": 1,
+      "windowTitle": "Roxy Command Center",
+      "selectedBackend": {
+        "error": "<urlopen error [Errno 111] Connection refused>",
+        "ok": false,
+        "reachable": false,
+        "status": null,
+        "url": "http://127.0.0.1:9/health"
+      },
+      "healthyPeerCount": 5
+    },
+    {
+      "backend": "liteLLM",
+      "overrideEnv": "RCC_LITELLM_HEALTH_URL",
+      "status": "RCC_BACKEND_DEGRADED",
+      "ok": true,
+      "processAlive": true,
+      "sourceCommit": "4dd10455499e7cc50f62dab802b53401e2168bc2",
+      "sourceCommitVerified": true,
+      "sourceAligned": true,
+      "visibleWindowCount": 1,
+      "windowTitle": "Roxy Command Center",
+      "selectedBackend": {
+        "error": "<urlopen error [Errno 111] Connection refused>",
+        "ok": false,
+        "reachable": false,
+        "status": null,
+        "url": "http://127.0.0.1:9/health"
+      },
+      "healthyPeerCount": 5
+    },
+    {
+      "backend": "ollama",
+      "overrideEnv": "RCC_OLLAMA_HEALTH_URL",
+      "status": "RCC_BACKEND_DEGRADED",
+      "ok": true,
+      "processAlive": true,
+      "sourceCommit": "4dd10455499e7cc50f62dab802b53401e2168bc2",
+      "sourceCommitVerified": true,
+      "sourceAligned": true,
+      "visibleWindowCount": 1,
+      "windowTitle": "Roxy Command Center",
+      "selectedBackend": {
+        "error": "<urlopen error [Errno 111] Connection refused>",
+        "ok": false,
+        "reachable": false,
+        "status": null,
+        "url": "http://127.0.0.1:9/health"
+      },
+      "healthyPeerCount": 5
+    },
+    {
+      "backend": "operatorKernel",
+      "overrideEnv": "RCC_OPERATOR_KERNEL_HEALTH_URL",
+      "status": "RCC_BACKEND_DEGRADED",
+      "ok": true,
+      "processAlive": true,
+      "sourceCommit": "4dd10455499e7cc50f62dab802b53401e2168bc2",
+      "sourceCommitVerified": true,
+      "sourceAligned": true,
+      "visibleWindowCount": 1,
+      "windowTitle": "Roxy Command Center",
+      "selectedBackend": {
+        "error": "<urlopen error [Errno 111] Connection refused>",
+        "ok": false,
+        "reachable": false,
+        "status": null,
+        "url": "http://127.0.0.1:9/health"
+      },
+      "healthyPeerCount": 5
+    },
+    {
+      "backend": "testingBay",
+      "overrideEnv": "RCC_TESTING_BAY_HEALTH_URL",
+      "status": "RCC_BACKEND_DEGRADED",
+      "ok": true,
+      "processAlive": true,
+      "sourceCommit": "4dd10455499e7cc50f62dab802b53401e2168bc2",
+      "sourceCommitVerified": true,
+      "sourceAligned": true,
+      "visibleWindowCount": 1,
+      "windowTitle": "Roxy Command Center",
+      "selectedBackend": {
+        "error": "<urlopen error [Errno 111] Connection refused>",
+        "ok": false,
+        "reachable": false,
+        "status": null,
+        "url": "http://127.0.0.1:9/health"
+      },
+      "healthyPeerCount": 5
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "backendStatuses": {
+    "ada": {
+      "ok": true,
+      "status": 200,
+      "url": "http://127.0.0.1:8085/health"
+    },
+    "bridge": {
+      "ok": true,
+      "status": 200,
+      "url": "http://127.0.0.1:8787/health"
+    },
+    "liteLLM": {
+      "ok": true,
+      "status": 200,
+      "url": "http://127.0.0.1:4000/health/liveliness"
+    },
+    "ollama": {
+      "ok": true,
+      "status": 200,
+      "url": "http://127.0.0.1:11434/api/tags"
+    },
+    "operatorKernel": {
+      "ok": true,
+      "status": 200,
+      "url": "http://127.0.0.1:9135/health"
+    },
+    "testingBay": {
+      "ok": true,
+      "status": 200,
+      "url": "http://192.168.3.3:9311/health"
+    }
+  },
+  "dbusOwner": ":1.1944",
+  "dbusOwnerPid": 2762971,
+  "generatedAt": "2026-07-10T21:29:14.380150+00:00",
+  "lastLaunchExit": {
+    "details": "Normal shutdown",
+    "pid": 2183542,
+    "reason": "user_close",
+    "ts": "2026-07-10T13:49:00.145720"
+  },
+  "lastTraceback": null,
+  "launcherPath": "/home/mark/.local/bin/roxy-command-center",
+  "ok": true,
+  "primaryIdentityValid": true,
+  "process": {
+    "alive": true,
+    "argv": [
+      "python3",
+      "-X",
+      "faulthandler",
+      "-u",
+      "main.py"
+    ],
+    "cwd": "/mnt/work/roxy-core/apps/roxy-command-center-review",
+    "executable": "/usr/bin/python3.12",
+    "pid": 2762971,
+    "uid": 1000
+  },
+  "processAlive": true,
+  "schemaVersion": "rcc-native-health.v1",
+  "sourceAligned": true,
+  "sourceCommit": "4dd10455499e7cc50f62dab802b53401e2168bc2",
+  "sourceCommitSource": "process-environment",
+  "sourceCommitVerified": true,
+  "status": "RCC_NATIVE_HEALTHY",
+  "visibleWindowCount": 1,
+  "windowGeometry": "1673x922+39+1100",
+  "windowProbeAvailable": true,
+  "windowTitle": "Roxy Command Center",
+  "windows": [
+    {
+      "geometry": "1673x922+39+1100",
+      "title": "Roxy Command Center",
+      "windowId": "25165828"
+    }
+  ],
+  "workingTreeCommit": "4dd10455499e7cc50f62dab802b53401e2168bc2"
+}

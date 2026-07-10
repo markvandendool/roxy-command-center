@@ -1,0 +1,67 @@
+RCC_FRESH_SOURCE_ROOT=/tmp/rcc-fresh-source.GNjPjl
+RCC_FRESH_SOURCE_COMMIT=553f3a418779ac238119496adc37845f52468710
+RCC_FRESH_ARCHIVE_TRACKED_BYTECODE=0
+RCC_OVERVIEW_CONSTRUCTION_PASS
+[OverviewCard] RCC_SPARKLINE_INVALID_SAMPLE card='Memory' value=None reason=not numeric
+[OverviewCard] RCC_SPARKLINE_INVALID_SAMPLE card='Memory' value='not-a-number' reason=not numeric
+[OverviewCard] RCC_SPARKLINE_INVALID_SAMPLE card='Memory' value=nan reason=not finite
+[OverviewCard] RCC_SPARKLINE_INVALID_SAMPLE card='Memory' value=inf reason=not finite
+[OverviewCard] RCC_SPARKLINE_INVALID_SAMPLE card='Memory' value=-inf reason=not finite
+RCC_OVERVIEW_SPARKLINE_PASS
+RCC_NATIVE_RUNTIME_HEALTH_PASS
+RCC_CODEX_INTEGRATION_ACTION_PASS
+RCC_NATIVE_CODEX_PANEL_PASS
+[ChatService] Lane set to frontier -> roxy-coder-frontier
+[TalkColumn] ========== INIT BEGIN ==========
+[TalkColumn] Base widget initialized
+[TalkColumn] Getting services...
+[TalkColumn] Services acquired
+[TalkColumn] Building UI...
+[TalkColumn] Loading settings...
+[Talk] Loaded sticky route: AUTO
+[ChatService] Lane set to frontier -> roxy-coder-frontier
+[Talk] Lane: FRONTIER
+[Talk] Loaded sticky pool: FRONTIER
+[TalkColumn] Connecting to roxy...
+[ChatService] Status: connecting - Connecting to ROXY harness...
+[TalkColumn] Starting info polling...
+[TalkColumn] ========== INIT COMPLETE ==========
+[ChatService] Ping failed: g-io-error-quark: Could not connect to 127.0.0.1: Connection refused (39)
+[ChatService] Status: error - Connection failed: g-io-error-quark: Could not connect to 127.0.0.1: Connection refused (39)
+{
+  "model": "roxy-coder-frontier",
+  "sessionId": "roxy_mrfgdao4_ccbea266",
+  "persistenceStatus": "live",
+  "routeDecision": {
+    "originalModel": "roxy-coder-frontier",
+    "selectedModel": "roxy-coder-frontier",
+    "rerouted": false,
+    "reason": null,
+    "quarantined": false,
+    "recommendedProviderId": "codex"
+  }
+}
+[TalkColumn] ========== INIT BEGIN ==========
+[TalkColumn] Base widget initialized
+[TalkColumn] Getting services...
+[TalkColumn] Services acquired
+[TalkColumn] Building UI...
+[TalkColumn] Loading settings...
+[Talk] Loaded sticky route: AUTO
+[ChatService] Lane set to frontier -> roxy-coder-frontier
+[Talk] Lane: FRONTIER
+[Talk] Loaded sticky pool: FRONTIER
+[TalkColumn] Connecting to roxy...
+[ChatService] Status: connecting - Connecting to ROXY harness...
+[TalkColumn] Starting info polling...
+[TalkColumn] ========== INIT COMPLETE ==========
+[ChatService] Status: connected - ROXY harness ready at http://127.0.0.1:4001 -> roxy-coder-frontier
+{
+  "status": "connected",
+  "model": "roxy-coder-frontier"
+}
+RCC_CHAT_HARNESS_CONTRACT_PASS
+RCC_COMMAND_CATALOG_ASYNC_PASS
+{"code": "RCC_SURFACE_UPDATE_FAILED", "evaluatedExpression": "overview.update(data)", "exceptionName": "TypeError", "message": "bad card payload", "stack": "Traceback (most recent call last):\n  File \"/tmp/rcc-fresh-source.GNjPjl/main.py\", line 46, in run_surface_update\n    callback(data)\n  File \"/tmp/rcc-fresh-source.GNjPjl/tests/test_surface_update_isolation.py\", line 18, in broken\n    raise TypeError(\"bad card payload\")\nTypeError: bad card payload\n", "surfaceId": "overview", "timestamp": "2026-07-10T15:33:43.339517"}
+RCC_SURFACE_UPDATE_ISOLATION_PASS
+RCC_FRESH_SOURCE_VALIDATION_PASS

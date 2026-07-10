@@ -1,0 +1,157 @@
+{
+  "schemaVersion": "rcc-native-production-durability.v1",
+  "goal": "RCC-NATIVE-PRODUCTION-DURABILITY-V1",
+  "closedAt": "2026-07-10T21:35:30Z",
+  "codeRelease": {
+    "repository": "markvandendool/roxy-command-center",
+    "branch": "main",
+    "commit": "553f3a418779ac238119496adc37845f52468710",
+    "releasePath": "ReleaseCaptain",
+    "remoteMainVerified": true
+  },
+  "supportingMindSongCommits": {
+    "sharedCodexIntegration": "824b8f3171c150d1181b3dce921d89145a6633bf",
+    "nativeRecoveryEvidence": "0061edbfe7046007358387287c27f37228615068",
+    "adaRuntimeTruthAndUnit": "71415f86fced2c2bad2aad3757000108a7bbde9f"
+  },
+  "rootCause": {
+    "exception": "TypeError",
+    "failingExpression": "SparklineWidget(history_size=30)",
+    "correction": "SparklineWidget()",
+    "fixCommit": "20b72bd8ee52ca3a9e5fc54e653c7f18e2832328",
+    "regressionTest": "tests/test_overview_construction.py"
+  },
+  "acceptance": {
+    "RCC_SOURCE_FIX_PUSHED": true,
+    "INSTALLED_LAUNCHER_PROOF": true,
+    "REGRESSION_TEST": true,
+    "LIVE_SPARKLINE_UPDATES": true,
+    "STALE_SINGLETON_RECOVERY": true,
+    "NATIVE_CODEX_PIXELS": true,
+    "NATIVE_ADA_ROUNDTRIP": true,
+    "FRESH_CHECKOUT_PROOF": true,
+    "DEGRADED_DEPENDENCY_MATRIX": true,
+    "RUNNING_BUILD_PROVENANCE": true,
+    "PYTHON_BYTECODE_HYGIENE": true
+  },
+  "installedLauncher": {
+    "path": "/home/mark/.local/bin/roxy-command-center",
+    "canonicalTarget": "/mnt/work/roxy-core/apps/roxy-command-center-review/launch.sh",
+    "desktopPath": "/home/mark/.local/share/applications/roxy-command-center.desktop",
+    "autostartPath": "/home/mark/.config/autostart/roxy-command-center.desktop",
+    "desktopFilesMatchCanonical": true,
+    "observedLifetimeSecondsBeforeAcceptedClose": 199,
+    "processCount": 1,
+    "dbusOwnerCount": 1,
+    "visibleWindowCount": 1,
+    "acceptedCloseAction": "Alt+F4",
+    "acceptedExitBreadcrumb": {
+      "pid": 2762971,
+      "reason": "user_close",
+      "details": "Normal shutdown"
+    },
+    "reopenSucceeded": true
+  },
+  "buildProvenance": {
+    "pixelBuild": "4dd10455499e7cc50f62dab802b53401e2168bc2",
+    "source": "RCC_SOURCE_COMMIT inherited by the running process",
+    "healthProbe": "/proc/<dbusOwnerPid>/environ",
+    "workingTreeAlignedDuringPixelProof": true,
+    "failClosedStates": [
+      "RCC_BUILD_PROVENANCE_MISSING",
+      "RCC_BUILD_SOURCE_DRIFT"
+    ]
+  },
+  "nativePixels": {
+    "home": "native-home.png",
+    "overview": "native-overview.png",
+    "codex": "native-codex-status.png",
+    "ada": "native-ada-response.png",
+    "captureType": "native X11 GTK4 window",
+    "browserSubstitution": false
+  },
+  "codex": {
+    "status": "CODEX_INTEGRATION_DEGRADED",
+    "cliVersion": "0.144.1",
+    "identity": "codex-regent",
+    "exactIdentityBinding": true,
+    "matchCount": 1,
+    "mcpParity": true,
+    "policyTier": "T0",
+    "receiptId": "717c8c10-cd61-4f52-adbb-99300b2c0da0",
+    "operatorTrace": "native-codex-operator-trace.json",
+    "honestBlocker": "CODEX_CAPTURE_GRADE_BINDING_INCOMPLETE"
+  },
+  "ada": {
+    "nativeReceipt": "native-ada-chat-receipt.json",
+    "requestedModel": "roxy-coder-frontier",
+    "selectedModel": "roxy-coder-frontier",
+    "rerouted": false,
+    "degradedFallback": false,
+    "harnessBypassDetected": false,
+    "persistenceStatus": "live",
+    "memoryStatus": "persisted",
+    "clientLatencyMs": 3975,
+    "providerTokensPerSecond": 38.8064180641289,
+    "returnedCode": "print(sum(i*i for i in range(1, 8)))",
+    "sandbox": "native-ada-sandbox.json",
+    "sandboxStdout": "140"
+  },
+  "adaService": {
+    "unit": "roxy-coder-frontier.service",
+    "enabled": true,
+    "active": true,
+    "bind": "127.0.0.1:8085",
+    "harness": "127.0.0.1:4001",
+    "liteLLM": "127.0.0.1:4000"
+  },
+  "degradedMatrix": {
+    "receipt": "degraded-backend-matrix.json",
+    "dependencies": [
+      "operatorKernel",
+      "bridge",
+      "ollama",
+      "liteLLM",
+      "ada",
+      "testingBay"
+    ],
+    "method": "override exactly one health URL to a refused loopback endpoint",
+    "everyCaseKeptProcessAlive": true,
+    "everyCaseKeptOneVisibleWindow": true,
+    "everyCaseReportedRccBackendDegraded": true,
+    "everyCaseKeptFivePeersHealthy": true
+  },
+  "cleanSourceProof": {
+    "localArchive": "fresh-source-validation.txt",
+    "remoteGitHubArchive": "github-archive-validation.txt",
+    "remoteCommit": "553f3a418779ac238119496adc37845f52468710",
+    "remoteArchiveExactCommit": true,
+    "trackedBytecodeFiles": 0,
+    "literalWorktreeAttempt": "denied by command firewall WORKTREE_OR_CLONE policy",
+    "acceptedEquivalent": "exact pushed GitHub commit archive, freshly downloaded and tested"
+  },
+  "hardening": {
+    "sparklineHistoryOwner": "OverviewCard",
+    "sparklineHistoryBounded": true,
+    "invalidSparklineSamplesVisible": true,
+    "singletonKillScope": "exact D-Bus owner PID after UID, cwd, executable, argv, and zero-window verification",
+    "broadPkill": false,
+    "chatStartupProbeTimeoutSeconds": 3,
+    "chatStartupRetries": 0,
+    "chatGenerationTimeoutSeconds": 120,
+    "commandCatalogLoadsOffGtkThread": true,
+    "nativeSurfaceUpdatesIsolated": true,
+    "surfaceErrorsExposeExpressionExceptionMessageStackAndTimestamp": true
+  },
+  "disqualifiedEvidence": [
+    {
+      "action": "xdotool windowclose",
+      "reason": "externally destroyed the GdkSurface and produced a Gdk assertion; it is not accepted as the product close path",
+      "replacement": "Alt+F4 against the active native window produced a clean user_close breadcrumb and successful reopen"
+    }
+  ],
+  "remainingHonestDegradation": [
+    "Codex capture-grade terminal binding is incomplete; native UI renders CODEX_CAPTURE_GRADE_BINDING_INCOMPLETE.",
+    "Dark Factory aggregate may remain DEGRADED for decode-6900xt or Judge lanes; this does not falsify RCC native launch, Codex status, or Ada Frontier proof."
+  ]
+}

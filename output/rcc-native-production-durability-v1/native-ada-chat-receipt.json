@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-07-10T15:28:27.121274",
+  "integrity": {
+    "failures": [],
+    "ok": true
+  },
+  "request": {
+    "lane": "frontier",
+    "model": "roxy-coder-frontier",
+    "prompt": "Return only valid Python source, no Markdown or explanation: print(sum(i*i for i in range(1, 8)))",
+    "routeMode": "AUTO"
+  },
+  "response": {
+    "clientLatencyMs": 3975,
+    "content": "print(sum(i*i for i in range(1, 8)))",
+    "degradedFallback": false,
+    "harnessBypassDetected": false,
+    "memoryStatus": "persisted",
+    "model": "roxy-coder-frontier",
+    "persistenceStatus": "live",
+    "providerTimings": {
+      "cache_n": 0,
+      "draft_n": 10,
+      "draft_n_accepted": 10,
+      "predicted_ms": 386.534,
+      "predicted_n": 15,
+      "predicted_per_second": 38.8064180641289,
+      "predicted_per_token_ms": 25.768933333333333,
+      "prompt_ms": 1481.913,
+      "prompt_n": 1139,
+      "prompt_per_second": 768.6011257071096,
+      "prompt_per_token_ms": 1.3010649692712906
+    },
+    "routeDecision": {
+      "originalModel": "roxy-coder-frontier",
+      "quarantined": false,
+      "reason": null,
+      "recommendedProviderId": "codex",
+      "rerouted": false,
+      "selectedModel": "roxy-coder-frontier"
+    },
+    "sessionId": "roxy_mrfg6i5w_3bd19b6c",
+    "usage": {
+      "completion_tokens": 15,
+      "prompt_tokens": 1139,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "total_tokens": 1154
+    }
+  },
+  "schemaVersion": "rcc-native-chat-receipt.v1",
+  "sourceCommit": "4dd10455499e7cc50f62dab802b53401e2168bc2"
+}

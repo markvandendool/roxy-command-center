@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "rcc-native-ada-sandbox.v1",
+  "sourceReceipt": "native-ada-chat-receipt.json",
+  "isolation": "bwrap --unshare-all --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp",
+  "networkNamespace": "isolated",
+  "exitCode": 0,
+  "stdout": "140"
+}
