@@ -8,6 +8,8 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
+from collections import deque
+import math
 from typing import Optional, Dict, Any
 
 from widgets.graph_widget import SparklineWidget, GraphConfig
@@ -36,7 +38,10 @@ class OverviewCard(Gtk.Box):
         self.add_css_class("overview-card")
         
         self.on_click = on_click
+        self.title = title
         self._sparkline: Optional[SparklineWidget] = None
+        self._sparkline_history = deque(maxlen=30)
+        self._sparkline_error: Optional[Gtk.Label] = None
         
         # Make clickable
         if on_click:
@@ -79,6 +84,14 @@ class OverviewCard(Gtk.Box):
             self._sparkline = SparklineWidget()
             self._sparkline.set_margin_top(8)
             self.append(self._sparkline)
+
+            self._sparkline_error = Gtk.Label()
+            self._sparkline_error.set_xalign(0)
+            self._sparkline_error.set_wrap(True)
+            self._sparkline_error.add_css_class("caption")
+            self._sparkline_error.add_css_class("error")
+            self._sparkline_error.set_visible(False)
+            self.append(self._sparkline_error)
     
     def set_value(self, value: str):
         """Set the main value."""
@@ -88,10 +101,38 @@ class OverviewCard(Gtk.Box):
         """Set the subtitle."""
         self.subtitle_label.set_label(text)
     
-    def add_sparkline_value(self, value: float):
-        """Add a value to the sparkline."""
-        if self._sparkline:
-            self._sparkline.add_value(value)
+    def add_sparkline_value(self, value: float) -> bool:
+        """Append one finite sample to this card's bounded history."""
+        if not self._sparkline:
+            return False
+
+        try:
+            sample = float(value)
+        except (TypeError, ValueError):
+            return self._show_sparkline_error(value, "not numeric")
+
+        if not math.isfinite(sample):
+            return self._show_sparkline_error(value, "not finite")
+
+        self._sparkline_history.append(sample)
+        self._sparkline.set_history(list(self._sparkline_history))
+        self.remove_css_class("status-warning")
+        if self._sparkline_error:
+            self._sparkline_error.set_visible(False)
+            self._sparkline_error.set_label("")
+        return True
+
+    def _show_sparkline_error(self, value: Any, reason: str) -> bool:
+        detail = f"Telemetry sample rejected: {reason}"
+        print(
+            f"[OverviewCard] RCC_SPARKLINE_INVALID_SAMPLE "
+            f"card={self.title!r} value={value!r} reason={reason}"
+        )
+        self.add_css_class("status-warning")
+        if self._sparkline_error:
+            self._sparkline_error.set_label(detail)
+            self._sparkline_error.set_visible(True)
+        return False
     
     def set_sparkline_color(self, r: float, g: float, b: float):
         """Set sparkline color."""
