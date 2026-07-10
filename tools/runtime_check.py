@@ -372,11 +372,17 @@ def terminate_exact_primary(pid: int, timeout: float = 5.0) -> dict:
 
 def prepare_launch() -> tuple[dict, int]:
     health = native_health_report(include_backends=False)
+    launch_source_commit = health.get("sourceCommit") or health.get("workingTreeCommit")
     base_receipt = {
         "schemaVersion": "rcc-native-launch-receipt.v1",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "launcherPath": str(LAUNCHER_PATH),
-        "sourceCommit": health.get("sourceCommit"),
+        "sourceCommit": launch_source_commit,
+        "sourceCommitSource": (
+            health.get("sourceCommitSource")
+            if health.get("sourceCommit")
+            else "working-tree-launch-target"
+        ),
         "observed": health,
     }
 

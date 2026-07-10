@@ -140,6 +140,21 @@ def test_prepare_launch_is_fail_closed_and_exact_pid_scoped():
         assert report["outcome"] == "RECOVERED_START_REQUIRED"
         terminate.assert_called_once_with(4242)
 
+    missing = {
+        "processAlive": False,
+        "sourceCommit": None,
+        "sourceCommitSource": None,
+        "workingTreeCommit": "launch-target-commit",
+    }
+    with (
+        patch.object(runtime_check, "native_health_report", return_value=missing),
+        patch.object(runtime_check, "write_launch_receipt", return_value=receipt_path),
+    ):
+        report, code = runtime_check.prepare_launch()
+        assert code == 0
+        assert report["sourceCommit"] == "launch-target-commit"
+        assert report["sourceCommitSource"] == "working-tree-launch-target"
+
 
 def test_each_backend_can_be_isolated_with_a_dead_endpoint():
     dead_url = "http://127.0.0.1:9/health"
