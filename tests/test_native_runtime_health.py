@@ -16,6 +16,7 @@ from tools.runtime_check import (
     DEFAULT_BACKEND_TARGETS,
     classify_native_health,
     get_backend_targets,
+    get_process_source_commit,
     is_expected_primary,
 )
 
@@ -28,6 +29,8 @@ def base_report():
         "visibleWindowCount": 1,
         "backendStatuses": {"kernel": {"ok": True}},
         "lastTraceback": None,
+        "sourceCommitVerified": True,
+        "sourceAligned": True,
     }
 
 
@@ -52,6 +55,17 @@ def test_named_health_states():
     assert classify_native_health(report) == "RCC_STARTUP_EXCEPTION"
 
 
+def test_build_provenance_is_fail_closed():
+    report = base_report()
+    report["sourceCommitVerified"] = False
+    report["sourceAligned"] = None
+    assert classify_native_health(report) == "RCC_BUILD_PROVENANCE_MISSING"
+
+    report["sourceCommitVerified"] = True
+    report["sourceAligned"] = False
+    assert classify_native_health(report) == "RCC_BUILD_SOURCE_DRIFT"
+
+
 def test_primary_identity_requires_exact_uid_cwd_executable_and_main():
     identity = {
         "alive": True,
@@ -73,6 +87,14 @@ def test_primary_identity_requires_exact_uid_cwd_executable_and_main():
         assert not is_expected_primary(altered)
 
 
+def test_process_build_stamp_is_read_from_proc_environment():
+    with patch.object(Path, "read_bytes", return_value=b"PATH=/usr/bin\0RCC_SOURCE_COMMIT=abc123\0"):
+        assert get_process_source_commit(4242) == "abc123"
+
+    with patch.object(Path, "read_bytes", return_value=b"PATH=/usr/bin\0"):
+        assert get_process_source_commit(4242) is None
+
+
 def launch_health(window_count=1):
     return {
         "processAlive": True,
@@ -81,6 +103,8 @@ def launch_health(window_count=1):
         "visibleWindowCount": window_count,
         "dbusOwnerPid": 4242,
         "sourceCommit": "abc123",
+        "sourceCommitVerified": True,
+        "sourceAligned": True,
     }
 
 
@@ -139,7 +163,9 @@ def test_each_backend_can_be_isolated_with_a_dead_endpoint():
 
 def main() -> int:
     test_named_health_states()
+    test_build_provenance_is_fail_closed()
     test_primary_identity_requires_exact_uid_cwd_executable_and_main()
+    test_process_build_stamp_is_read_from_proc_environment()
     test_prepare_launch_is_fail_closed_and_exact_pid_scoped()
     test_each_backend_can_be_isolated_with_a_dead_endpoint()
     print("RCC_NATIVE_RUNTIME_HEALTH_PASS")

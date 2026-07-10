@@ -157,6 +157,22 @@ def get_process_identity(pid: int | None) -> dict:
         }
 
 
+def get_process_source_commit(pid: int | None) -> str | None:
+    """Read the immutable build stamp inherited by the running process."""
+    if not pid:
+        return None
+    try:
+        entries = (Path("/proc") / str(pid) / "environ").read_bytes().split(b"\0")
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+        return None
+    prefix = b"RCC_SOURCE_COMMIT="
+    for entry in entries:
+        if entry.startswith(prefix):
+            commit = entry[len(prefix) :].decode("ascii", errors="ignore").strip()
+            return commit or None
+    return None
+
+
 def is_expected_primary(identity: dict) -> bool:
     executable = Path(identity.get("executable") or "").name
     argv = [str(part) for part in identity.get("argv") or []]
@@ -261,6 +277,10 @@ def classify_native_health(report: dict) -> str:
         return "RCC_STALE_PRIMARY_NO_WINDOW"
     if count > 1:
         return "RCC_MULTIPLE_WINDOWS"
+    if not report.get("sourceCommitVerified"):
+        return "RCC_BUILD_PROVENANCE_MISSING"
+    if report.get("sourceAligned") is False:
+        return "RCC_BUILD_SOURCE_DRIFT"
     if any(not status.get("ok") for status in report.get("backendStatuses", {}).values()):
         return "RCC_BACKEND_DEGRADED"
     return "RCC_NATIVE_HEALTHY"
@@ -271,6 +291,8 @@ def native_health_report(include_backends: bool = True) -> dict:
     identity = get_process_identity(dbus.get("pid"))
     window_probe = get_visible_windows(dbus.get("pid"))
     windows = window_probe["windows"]
+    process_source_commit = get_process_source_commit(dbus.get("pid"))
+    working_tree_commit = get_source_commit()
     report = {
         "schemaVersion": "rcc-native-health.v1",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
@@ -285,7 +307,15 @@ def native_health_report(include_backends: bool = True) -> dict:
         "windowTitle": windows[0].get("title") if len(windows) == 1 else None,
         "windowGeometry": windows[0].get("geometry") if len(windows) == 1 else None,
         "launcherPath": str(LAUNCHER_PATH),
-        "sourceCommit": get_source_commit(),
+        "sourceCommit": process_source_commit,
+        "sourceCommitVerified": process_source_commit is not None,
+        "sourceCommitSource": "process-environment" if process_source_commit else None,
+        "workingTreeCommit": working_tree_commit,
+        "sourceAligned": (
+            process_source_commit == working_tree_commit
+            if process_source_commit and working_tree_commit
+            else None
+        ),
         "backendStatuses": get_backend_statuses() if include_backends else {},
         "lastLaunchExit": _read_json(RUNTIME_DIR / "last_exit.json"),
         "lastTraceback": get_last_traceback(),

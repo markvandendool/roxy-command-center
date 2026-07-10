@@ -7,6 +7,7 @@ Never routes arbitrary shell, systemd mutation, or secrets.
 """
 
 import json
+import os
 import subprocess
 import urllib.request
 import urllib.error
@@ -62,6 +63,9 @@ def is_safe_action(action_type: str) -> bool:
 @lru_cache(maxsize=1)
 def get_source_commit() -> str:
     """Return the exact native RCC build commit used in action receipts."""
+    stamped_commit = os.getenv("RCC_SOURCE_COMMIT", "").strip()
+    if stamped_commit:
+        return stamped_commit
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],

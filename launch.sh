@@ -12,6 +12,7 @@ export DISPLAY="${DISPLAY:-:1}"
 export XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/gdm/Xauthority}"
 export GDK_BACKEND="${GDK_BACKEND:-x11}"
 export OLLAMA_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
+export RCC_SOURCE_COMMIT="${RCC_SOURCE_COMMIT:-$(git rev-parse HEAD)}"
 
 set +e
 PREPARE_OUTPUT="$(python3 tools/runtime_check.py prepare-launch 2>&1)"
